@@ -1,0 +1,142 @@
+# StudyAgent —— 个人学习 Agent（DDD 单体，单 Agent）
+
+基于 **Spring Boot 4.1 / Java 21 / Maven / MySQL / Redis / RabbitMQ(可选) / Spring AI(OpenAI 兼容)** 的
+个人学习 Agent 后端骨架。当前为**单 Agent** 实现：一个统一「学习 Agent」问答入口，自动使用个人 RAG 知识库回答，
+外部扩展点（planner/teacher/reviewer 等）可在此架构上演进为多 Agent。
+
+## 一、功能（对应需求）
+
+| 需求 | 落地 |
+| --- | --- |
+| 个人 RAG 库：课程表 / 学习安排 / PPT / 题目等，并从中提取学习内容 | `/api/rag/**`：上传文档（PDF/PPT(X)/Word/Excel/TXT/MD）→ Tika 解析 → 分块 → Embedding → 向量检索；`/api/notes/auto-from-document` 一键生成学习整理，`/api/questions/from-document` 一键出题 |
+| 基础问答式教学；创建题库与错题整理 | `/api/agent/chat` 教学问答（RAG + 会话历史）；`/api/banks` 题库、`/api/questions` 题目、`/api/wrongs` 错题本（自动判分沉淀错题） |
+| 学习计划；按学习时间与内容自动提示 | `/api/plans/**` 计划与任务；`StudyReminderJob` 每分钟扫描到期任务生成提醒（`/api/reminders`），可选 MQ 推送 |
+| 知识管理：学习整理、自动笔记与学习分析 | `/api/notes/**`（手动 + 会话/文档自动整理）；`/api/analytics/learning` 统计与 `/learning/summary` AI 文字分析 |
+
+> 向量检索当前使用进程内 `SimpleVectorStore`（Spring AI）。重启后由摄入流程按文档 `text_content` 重建；
+> 数据量大后可换 pgvector/Redis Vector 等（见 [docs/architecture.md](docs/architecture.md)）。
+
+## 二、技术栈与分层
+
+- Spring Boot 4.1.1 · Java 21 · Maven（仓库内 Maven 3.9.16，无需系统安装 Maven）
+- Spring Web MVC + Spring Security(全放行脚手架) · Spring Data JPA + MySQL 8
+- Spring Data Redis（缓存：今日任务/未读提醒数/待复习错题数等，带 TTL）
+- Spring AMQP + RabbitMQ（**默认关闭**；开启后文档摄入与提醒推送走队列，关闭则同步回退）
+- Spring AI（OpenAI 兼容端点）＋ Apache Tika（文档解析）
+
+目录按 DDD 分层（详见 [docs/architecture.md](docs/architecture.md)）：
+
+```
+src/main/java/studio/lingrui/studyagent
+├── domain/        领域层：chat / qa / plan / rag / knowledge 聚合 + 仓储接口 + 领域行为
+├── application/   应用层：用例编排（服务）、端口(port)接口、AI 提示词、分析统计
+├── infrastructure/ 基础设施：持久化(JPA)、AI 适配、向量库适配、Tika、文件存储、Redis 缓存、RabbitMQ、Web 上下文
+├── interfaces/    接口层：REST Controller + 请求/响应 DTO
+└── shared/        共享：统一响应/分页/错误码/全局异常
+```
+
+依赖方向：`interfaces → application → domain`，`infrastructure` 实现 `domain` 仓储接口与 `application` 端口。
+
+### 模块概览（源码包 → 职责）
+
+| 模块 | 职责 | 代表性内容 |
+| --- | --- | --- |
+| `domain` | 领域模型：聚合/实体/枚举 + 仓储接口 + 领域行为 | `chat`（会话/消息）、`qa`（题库/题目/错题）、`plan`（计划/任务/提醒）、`rag`（知识文档）、`knowledge`（笔记） |
+| `application` | 用例编排（应用服务）、端口接口、AI 提示词、学习分析 | `agent`（单 Agent 主循环）、`rag`（摄入/文档）、`qa`（判分/错题）、`plan`（计划/提醒 Job）、`knowledge`（自动笔记）、`analytics`、`port`（AiChatPort/VectorIndexPort/FileStorePort） |
+| `infrastructure` | 技术实现：持久化/缓存/消息/外部服务 | `persistence`（JPA 仓储）、`ai`（OpenAI 兼容适配）、`rag`（Tika/向量库）、`cache`（Redis）、`mq`（RabbitMQ）、`file`、`web`（用户上下文） |
+| `interfaces` | HTTP 适配层 | REST Controller + 请求/响应 DTO（`/api/agent`、`/api/rag`、`/api/questions`、`/api/plans` 等） |
+| `shared` | 跨层共享 | 统一响应 `ApiResponse`、分页、错误码、全局异常处理 |
+
+## 三、快速开始
+
+### 1. 启动基础中间件（MySQL/Redis/RabbitMQ）
+
+先启动 **Docker Desktop**，然后：
+
+```bash
+docker compose up -d          # 启动 mysql:8.4 redis:7 rabbitmq:4(15672 管理台)
+docker compose ps             # 等待 mysql healthy
+```
+
+### 2. 配置 AI（OpenAI 兼容）
+
+编辑环境变量或直接改 `src/main/resources/application.yml` 的 `spring.ai.openai.*`。
+常见供应商示例（DeepSeek 无 embedding 时可将 `AI_EMBEDDING_MODEL` 指向其他兼容网关）：
+
+```powershell
+$env:AI_BASE_URL='https://api.deepseek.com'
+$env:AI_API_KEY='sk-你的key'
+$env:AI_CHAT_MODEL='deepseek-chat'
+# $env:AI_EMBEDDING_MODEL='text-embedding-3-small'   # 需要 embedding 能力的供应商
+```
+
+### 3. 运行
+
+```bash
+.\scripts\mvn.ps1 spring-boot:run     # 等价于 mvnw，只是把 Maven 发行版/仓库放到项目内 .m2
+```
+
+启动后：`GET http://localhost:8080/actuator/health`
+
+> 说明：首次构建会向中央仓库下载依赖（项目内 `.m2/repository`）。PowerShell 自带 TLS 在部分环境不可用，
+> `scripts/mvn.ps1` 已绕过 wrapper，直接调用由 JVM 下载好的本地 Maven。
+
+### 4. 用户身份
+
+登录体系未接入前，通过请求头指定用户（缺省为配置的默认用户 1）：
+
+```
+X-User-Id: 1
+```
+
+### 5. 可选：开启 RabbitMQ 异步
+
+```powershell
+$env:STUDY_AGENT_MQ_ENABLED='true'
+```
+
+开启后：上传文档 → 发布摄入任务 → 消费者异步解析索引；学习提醒另发提醒队列。关闭时文档摄入在当前线程同步完成。
+
+## 四、主要 API
+
+统一响应 `{code,message,data}`，业务错误码见 `shared/exception/ErrorCode.java`。
+
+**Agent / 问答**
+- `POST /api/agent/chat` `{sessionId?, content}` → 回答+引用
+- `GET/PATCH /api/chat/sessions`、`GET /api/chat/sessions/{id}/messages`、`POST /api/chat/sessions/{id}/archive`
+
+**RAG 知识库**
+- `POST /api/rag/documents`（multipart: file, sourceType, tags?）
+- `GET/DELETE /api/rag/documents[/{id}]`、`POST /api/rag/documents/{id}/reindex`
+- `GET /api/rag/search?q=&topK=`
+
+**题库 / 刷题 / 错题**
+- `/api/banks` CRUD
+- `/api/questions` CRUD；`POST /api/questions/{id}/practice`；`POST /api/questions/from-document`
+- `/api/wrongs`：列表(可按状态)、新增错题、状态流转(PENDING/REVIEWED/MASTERED)、删除、`pending-count`
+
+**学习计划 / 提醒**
+- `/api/plans` CRUD；`/api/plans/today`；`/api/plans/{planId}/tasks` 与任务完成/删除
+- `/api/reminders`：列表/未读/未读数/标记已读
+
+**知识管理 / 分析**
+- `/api/notes` CRUD；`POST /api/notes/auto-from-session|auto-from-document`
+- `GET /api/analytics/learning`；`GET /api/analytics/learning/summary`(AI 总结)
+
+## 五、验证
+
+```bash
+.\scripts\mvn.ps1 test          # 单元测试（分块器/判分器）
+.\scripts\mvn.ps1 -DskipTests package   # 打 jar
+java -jar target\StudyAgent-0.0.1-SNAPSHOT.jar
+```
+
+## 六、说明与取舍（脚手架阶段）
+
+- 表结构由 Hibernate `ddl-auto=update` 自动生成；生产建议切 Flyway + `validate`。
+- 安全默认全放行；接入登录后收紧 `/api/**` 并做用户体系（现仅 `X-User-Id` 头）。
+- 实体即聚合（JPA 注解落在领域对象上并保留行为方法）；后续如需严格分离持久化模型可加映射层。
+- 领域仓储接口部分方法使用 Spring Data 分页类型，属务实取舍。
+- RabbitMQ 关闭时无任何连接尝试；开启但 Rabbit 不在线仅记录日志，不影响主流程。
+
+更多设计细节见 [docs/architecture.md](docs/architecture.md)。

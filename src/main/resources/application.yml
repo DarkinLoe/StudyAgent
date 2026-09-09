@@ -1,0 +1,101 @@
+server:
+  port: ${SERVER_PORT:8080}
+
+spring:
+  application:
+    name: StudyAgent
+
+  # ---------------- MySQL ----------------
+  datasource:
+    url: jdbc:mysql://${MYSQL_HOST:localhost}:${MYSQL_PORT:3306}/${MYSQL_DATABASE:study_agent}?useUnicode=true&characterEncoding=utf8&useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai&rewriteBatchedStatements=true
+    username: ${MYSQL_USERNAME:root}
+    password: ${MYSQL_PASSWORD:root}
+    hikari:
+      maximum-pool-size: 10
+      minimum-idle: 2
+
+  # ---------------- JPA ----------------
+  jpa:
+    hibernate:
+      # 脚手架阶段由 Hibernate 按实体自动建表；上生产请改用 Flyway + validate
+      ddl-auto: update
+    open-in-view: false
+    properties:
+      hibernate:
+        format_sql: false
+
+  # ---------------- Redis ----------------
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD:}
+      database: ${REDIS_DATABASE:0}
+      timeout: 3s
+
+  # ---------------- RabbitMQ ----------------
+  rabbitmq:
+    host: ${RABBITMQ_HOST:localhost}
+    port: ${RABBITMQ_PORT:5672}
+    username: ${RABBITMQ_USERNAME:guest}
+    password: ${RABBITMQ_PASSWORD:guest}
+    listener:
+      simple:
+        # 默认不自动启动消费者：未启用 MQ 时应用可无 RabbitMQ 独立运行
+        auto-startup: ${STUDY_AGENT_MQ_ENABLED:false}
+
+  # ---------------- Spring AI：OpenAI 兼容端点 ----------------
+  ai:
+    openai:
+      # 换成任意 OpenAI 兼容网关即可，例如：
+      #   DeepSeek   -> https://api.deepseek.com   （chat: deepseek-chat）
+      #   SiliconFlow-> https://api.siliconflow.cn/v1 （chat: Qwen/Qwen2.5-7B-Instruct, embedding: BAAI/bge-m3）
+      base-url: ${AI_BASE_URL:https://api.openai.com/v1}
+      api-key: ${AI_API_KEY:sk-not-configured}
+      chat:
+        options:
+          model: ${AI_CHAT_MODEL:gpt-4o-mini}
+          temperature: 0.7
+      embedding:
+        options:
+          model: ${AI_EMBEDDING_MODEL:text-embedding-3-small}
+
+  # ---------------- 文件上传 ----------------
+  servlet:
+    multipart:
+      max-file-size: 50MB
+      max-request-size: 60MB
+
+  jackson:
+    time-zone: Asia/Shanghai
+    date-format: yyyy-MM-dd HH:mm:ss
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics
+
+# ---------------- 业务自定义配置 ----------------
+study-agent:
+  user:
+    # 登录体系上线前：请求未带 X-User-Id 时使用的默认用户
+    default-user-id: 1
+  file:
+    upload-dir: ${UPLOAD_DIR:./data/uploads}
+    allowed-extensions: ppt,pptx,doc,docx,pdf,txt,md,xlsx,xls,csv
+  rag:
+    chunk-size: 800
+    chunk-overlap: 100
+    top-k: 4
+    min-score: 0.0
+  mq:
+    # 关闭时文档摄入走同步线程，提醒只落库不入队；开启后走 RabbitMQ 异步
+    enabled: ${STUDY_AGENT_MQ_ENABLED:false}
+    ingest-queue: study-agent.document.ingest
+    reminder-queue: study-agent.reminder.push
+  reminder:
+    # 学习提示轮询：每分钟扫描“到达开始时间且未完成未提醒”的计划任务
+    poll-cron: "0 * * * * *"
+  cache:
+    default-ttl: 10m
