@@ -93,6 +93,8 @@ study-agent:
     chunk-overlap: 100
     top-k: 4
     min-score: 0.0
+    # 启动时用已保存的解析文本重建进程内向量索引（重启后 RAG 仍可用）；文档很多时可关闭
+    reindex-on-startup: true
   mq:
     # 关闭时文档摄入走同步线程，提醒只落库不入队；开启后走 RabbitMQ 异步
     enabled: ${STUDY_AGENT_MQ_ENABLED:false}

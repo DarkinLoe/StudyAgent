@@ -34,6 +34,7 @@ public class RagDocumentService {
     private final FileStorePort fileStore;
     private final VectorIndexPort vectorIndex;
     private final RagIngestService ingestService;
+    private final KnowledgeKeywordSearchService keywordSearch;
     private final StudyAgentProperties props;
     private final ObjectProvider<MqGateway> mqGatewayProvider;
 
@@ -93,7 +94,7 @@ public class RagDocumentService {
     }
 
     /**
-     * 语义检索（供 API 直接查看知识库命中）。
+     * 语义检索（供 API 直接查看知识库命中）：向量检索失败或无命中时降级为关键词检索。
      */
     public List<studio.lingrui.studyagent.domain.rag.RetrievedChunk> search(Long userId, String query,
                                                                             Integer topK) {
@@ -101,7 +102,17 @@ public class RagDocumentService {
             throw new BizException(ErrorCode.BAD_REQUEST, "检索词不能为空");
         }
         int k = topK == null ? props.getRag().getTopK() : Math.min(Math.max(topK, 1), 20);
-        return vectorIndex.search(query, k, props.getRag().getMinScore());
+        try {
+            List<studio.lingrui.studyagent.domain.rag.RetrievedChunk> hits =
+                    vectorIndex.search(query, k, props.getRag().getMinScore(), userId);
+            if (!hits.isEmpty()) {
+                return hits;
+            }
+            log.info("向量检索无命中，降级为关键词检索: {}", query);
+        } catch (Exception e) {
+            log.warn("向量检索失败，降级为关键词检索: {}", e.getMessage());
+        }
+        return keywordSearch.search(userId, query, k);
     }
 
     private void dispatch(Long docId) {

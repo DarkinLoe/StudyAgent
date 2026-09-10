@@ -10,6 +10,7 @@ import org.springframework.transaction.annotation.Transactional;
 import studio.lingrui.studyagent.application.agent.skill.AgentSkill;
 import studio.lingrui.studyagent.application.agent.skill.AgentSkillFactory;
 import studio.lingrui.studyagent.application.chat.ChatReply;
+import studio.lingrui.studyagent.application.rag.KnowledgeKeywordSearchService;
 import studio.lingrui.studyagent.application.chat.ChatReply.Reference;
 import studio.lingrui.studyagent.application.port.AiChatPort;
 import studio.lingrui.studyagent.application.port.AiChatResult;
@@ -46,6 +47,7 @@ public class StudyAgentService {
     private final ChatSessionRepository sessions;
     private final ChatMessageRepository messages;
     private final VectorIndexPort vectorIndex;
+    private final KnowledgeKeywordSearchService keywordSearch;
     private final AiChatPort aiChat;
     private final AgentSkillFactory agentSkillFactory;
     private final StudyAgentProperties props;
@@ -77,7 +79,7 @@ public class StudyAgentService {
 
         messages.save(ChatMessage.create(session.getId(), userId, MessageRole.USER, text));
 
-        List<RetrievedChunk> hits = retrieve(text);
+        List<RetrievedChunk> hits = retrieve(text, userId);
         // 按当前用户构建可用技能（工具），并在系统提示中说明使用规则
         List<AgentSkill> skills = agentSkillFactory.forUser(userId);
         String systemPrompt = AIPrompts.tutorSystem(hits)
@@ -111,11 +113,25 @@ public class StudyAgentService {
         return new ChatReply(session.getId(), saved.getId(), answer, toReferences(hits));
     }
 
-    private List<RetrievedChunk> retrieve(String query) {
+    /**
+     * 检索个人知识库：优先向量检索（按用户隔离）；失败或无命中时降级为关键词检索，
+     * 保证"没有 Embedding 能力/额度"时 RAG 仍能工作（诚实降级而非整链路失败）。
+     */
+    private List<RetrievedChunk> retrieve(String query, Long userId) {
+        int k = props.getRag().getTopK();
         try {
-            return vectorIndex.search(query, props.getRag().getTopK(), props.getRag().getMinScore());
+            List<RetrievedChunk> hits = vectorIndex.search(query, k, props.getRag().getMinScore(), userId);
+            if (!hits.isEmpty()) {
+                return hits;
+            }
+            log.info("向量检索无命中，降级为关键词检索");
         } catch (Exception e) {
-            log.warn("RAG 检索失败，将无上下文回答: {}", e.getMessage());
+            log.warn("向量检索失败，降级为关键词检索: {}", e.getMessage());
+        }
+        try {
+            return keywordSearch.search(userId, query, k);
+        } catch (Exception e) {
+            log.warn("关键词降级检索也失败，将无上下文回答: {}", e.getMessage());
             return List.of();
         }
     }

@@ -5,6 +5,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import studio.lingrui.studyagent.application.port.FileStorePort;
 import studio.lingrui.studyagent.application.port.VectorIndexPort;
+import studio.lingrui.studyagent.domain.rag.IndexStatus;
 import studio.lingrui.studyagent.domain.rag.KnowledgeDocument;
 import studio.lingrui.studyagent.domain.rag.KnowledgeDocumentRepository;
 import studio.lingrui.studyagent.infrastructure.config.properties.StudyAgentProperties;
@@ -32,7 +33,7 @@ public class RagIngestService {
     private final StudyAgentProperties props;
 
     /**
-     * 摄入/重建单篇文档。失败时置 FAILED 并抛出 BizException。
+     * 摄入/重建单篇文档（重新解析文件）。失败时置 FAILED 并抛出 BizException。
      */
     public KnowledgeDocument ingest(Long docId) {
         KnowledgeDocument doc = documents.findById(docId)
@@ -46,15 +47,7 @@ public class RagIngestService {
             try (InputStream in = fileStore.open(doc.getStoredPath())) {
                 text = textExtraction.extract(in);
             }
-            int oldChunkCount = doc.getChunkCount() == null ? 0 : doc.getChunkCount();
-            int chunkCount = vectorIndex.indexDocument(
-                    doc.getId(),
-                    doc.getName(),
-                    doc.getSourceType(),
-                    text,
-                    props.getRag().getChunkSize(),
-                    props.getRag().getChunkOverlap(),
-                    oldChunkCount);
+            int chunkCount = indexText(doc, text);
             doc.markIndexed(text, chunkCount);
             return documents.save(doc);
         } catch (BizException e) {
@@ -70,6 +63,20 @@ public class RagIngestService {
     }
 
     /**
+     * 仅用已保存的解析文本重建向量索引（不重新解析文件）。
+     * 用于应用重启后恢复进程内向量库，避免"重启即检索不到"。
+     */
+    public KnowledgeDocument rebuildFromStoredText(KnowledgeDocument doc) {
+        if (doc.getTextContent() == null || doc.getTextContent().isBlank()) {
+            throw new BizException(ErrorCode.DOC_NOT_INDEXED,
+                    "文档缺少已解析文本，无法重建索引: " + doc.getId());
+        }
+        int chunkCount = indexText(doc, doc.getTextContent());
+        doc.markIndexed(doc.getTextContent(), chunkCount);
+        return documents.save(doc);
+    }
+
+    /**
      * 校验来源类型/扩展名等由上传侧负责；此处仅按 docId 取回文档供展示状态机使用。
      */
     public KnowledgeDocument getById(Long docId, Long userId) {
@@ -78,7 +85,19 @@ public class RagIngestService {
     }
 
     public List<KnowledgeDocument> listIndexed(Long userId) {
-        return documents.findByUserIdAndStatus(userId,
-                studio.lingrui.studyagent.domain.rag.IndexStatus.INDEXED);
+        return documents.findByUserIdAndStatus(userId, IndexStatus.INDEXED);
+    }
+
+    private int indexText(KnowledgeDocument doc, String text) {
+        int oldChunkCount = doc.getChunkCount() == null ? 0 : doc.getChunkCount();
+        return vectorIndex.indexDocument(
+                doc.getId(),
+                doc.getName(),
+                doc.getSourceType(),
+                text,
+                props.getRag().getChunkSize(),
+                props.getRag().getChunkOverlap(),
+                oldChunkCount,
+                doc.getUserId());
     }
 }

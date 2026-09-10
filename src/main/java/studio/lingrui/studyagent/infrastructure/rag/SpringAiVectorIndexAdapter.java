@@ -19,8 +19,8 @@ import java.util.Map;
 
 /**
  * RAG 向量索引适配器：
- * - 写入：文档全文 → 分块 → EmbeddingModel 向量化 → SimpleVectorStore（进程内，重启由摄入流程重建）
- * - 检索：query → embedding → 相似度 Top-K
+ * - 写入：文档全文 → 分块 → EmbeddingModel 向量化 → SimpleVectorStore（进程内，重启由启动器重建）
+ * - 检索：query → embedding → 相似度 Top-K → 按 userId 过滤（检索隔离）
  */
 @Slf4j
 @Service
@@ -46,7 +46,8 @@ public class SpringAiVectorIndexAdapter implements VectorIndexPort {
 
     @Override
     public int indexDocument(Long docId, String docName, DocumentSourceType sourceType,
-                             String fullText, int chunkSize, int chunkOverlap, int deleteExistingCount) {
+                             String fullText, int chunkSize, int chunkOverlap,
+                             int deleteExistingCount, Long userId) {
         deleteDocument(docId, deleteExistingCount); // 覆盖式重建
         List<String> chunks = TextChunker.split(fullText, chunkSize, chunkOverlap);
         List<Document> docs = new ArrayList<>(chunks.size());
@@ -55,12 +56,15 @@ public class SpringAiVectorIndexAdapter implements VectorIndexPort {
             meta.put("docId", docId);
             meta.put("docName", docName);
             meta.put("sourceType", sourceType.name());
+            if (userId != null) {
+                meta.put("userId", userId);
+            }
             docs.add(new Document(docId + "#" + i, chunks.get(i), meta));
         }
         if (!docs.isEmpty()) {
             store().add(docs);
         }
-        log.info("已索引文档 docId={} chunks={}", docId, docs.size());
+        log.info("已索引文档 docId={} userId={} chunks={}", docId, userId, docs.size());
         return docs.size();
     }
 
@@ -82,14 +86,19 @@ public class SpringAiVectorIndexAdapter implements VectorIndexPort {
     }
 
     @Override
-    public List<RetrievedChunk> search(String query, int topK, double minScore) {
+    public List<RetrievedChunk> search(String query, int topK, double minScore, Long userId) {
+        int k = Math.max(topK, 1);
+        // 多取一些候选，再按用户过滤，避免过滤后命中不足
+        int fetch = Math.max(k * 3, 10);
         SearchRequest request = SearchRequest.builder()
                 .query(query)
-                .topK(Math.max(topK, 1))
+                .topK(fetch)
                 .similarityThreshold((float) minScore)
                 .build();
         List<Document> hits = store().similaritySearch(request);
         return hits.stream()
+                .filter(d -> userId == null || userId.equals(userIdOf(d.getMetadata())))
+                .limit(k)
                 .map(d -> new RetrievedChunk(
                         docIdOf(d.getMetadata()),
                         nameOf(d.getMetadata()),
@@ -101,6 +110,14 @@ public class SpringAiVectorIndexAdapter implements VectorIndexPort {
 
     private Long docIdOf(Map<String, Object> meta) {
         Object v = meta.get("docId");
+        if (v instanceof Number n) {
+            return n.longValue();
+        }
+        return v == null ? null : Long.valueOf(v.toString());
+    }
+
+    private Long userIdOf(Map<String, Object> meta) {
+        Object v = meta.get("userId");
         if (v instanceof Number n) {
             return n.longValue();
         }

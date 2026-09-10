@@ -45,6 +45,8 @@ public class StudyAgentProperties {
         private int topK = 4;
         /** 相似度最低阈值（0~1，0 表示不过滤） */
         private double minScore = 0.0;
+        /** 应用启动时是否用已保存文本重建进程内向量索引 */
+        private boolean reindexOnStartup = true;
     }
 
     @Data

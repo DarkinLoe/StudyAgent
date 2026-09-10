@@ -22,5 +22,8 @@ public interface KnowledgeDocumentRepository {
     /** 当前用户所有已索引文档（重建向量库用） */
     List<KnowledgeDocument> findByUserIdAndStatus(Long userId, IndexStatus status);
 
+    /** 全部指定状态的文档（启动重建向量索引用） */
+    List<KnowledgeDocument> findByStatus(IndexStatus status);
+
     void delete(KnowledgeDocument doc);
 }
