@@ -7,6 +7,8 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import studio.lingrui.studyagent.application.agent.skill.AgentSkill;
+import studio.lingrui.studyagent.application.agent.skill.AgentSkillFactory;
 import studio.lingrui.studyagent.application.chat.ChatReply;
 import studio.lingrui.studyagent.application.chat.ChatReply.Reference;
 import studio.lingrui.studyagent.application.port.AiChatPort;
@@ -45,6 +47,7 @@ public class StudyAgentService {
     private final ChatMessageRepository messages;
     private final VectorIndexPort vectorIndex;
     private final AiChatPort aiChat;
+    private final AgentSkillFactory agentSkillFactory;
     private final StudyAgentProperties props;
     private final ObjectMapper objectMapper;
 
@@ -75,7 +78,10 @@ public class StudyAgentService {
         messages.save(ChatMessage.create(session.getId(), userId, MessageRole.USER, text));
 
         List<RetrievedChunk> hits = retrieve(text);
-        String systemPrompt = AIPrompts.tutorSystem(hits);
+        // 按当前用户构建可用技能（工具），并在系统提示中说明使用规则
+        List<AgentSkill> skills = agentSkillFactory.forUser(userId);
+        String systemPrompt = AIPrompts.tutorSystem(hits)
+                + (skills.isEmpty() ? "" : AIPrompts.toolGuide(skills));
 
         List<ChatTurn> turns = new ArrayList<>();
         turns.add(new ChatTurn(TurnRole.SYSTEM, systemPrompt));
@@ -91,7 +97,7 @@ public class StudyAgentService {
         }
         turns.add(new ChatTurn(TurnRole.USER, text));
 
-        AiChatResult result = callModel(turns);
+        AiChatResult result = callModel(turns, skills);
         String answer = result.text();
         String usageJson = toUsageJson(result);
         String referencesJson = toReferencesJson(hits);
@@ -114,9 +120,9 @@ public class StudyAgentService {
         }
     }
 
-    private AiChatResult callModel(List<ChatTurn> turns) {
+    private AiChatResult callModel(List<ChatTurn> turns, List<AgentSkill> skills) {
         try {
-            return aiChat.chat(turns);
+            return aiChat.chat(turns, skills);
         } catch (BizException e) {
             throw e;
         } catch (Exception e) {
