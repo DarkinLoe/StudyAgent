@@ -59,7 +59,43 @@ services:
       timeout: 10s
       retries: 10
 
+  # ---------------- 应用本体（可选 profile） ----------------
+  # 用法：docker compose --profile app up -d --build
+  # 不启用 profile 时只起中间件，应用仍可用 mvn spring-boot:run 在宿主机运行
+  app:
+    profiles: ["app"]
+    build:
+      context: .
+    container_name: study-agent-app
+    restart: unless-stopped
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      MYSQL_HOST: mysql
+      MYSQL_PORT: 3306
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-study_agent}
+      MYSQL_USERNAME: root
+      MYSQL_PASSWORD: ${MYSQL_ROOT_PASSWORD:-root}
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_PORT: 5672
+      STUDY_AGENT_MQ_ENABLED: ${STUDY_AGENT_MQ_ENABLED:-false}
+      AI_BASE_URL: ${AI_BASE_URL:-https://api.deepseek.com}
+      AI_API_KEY: ${AI_API_KEY:-sk-not-configured}
+      AI_CHAT_MODEL: ${AI_CHAT_MODEL:-deepseek-chat}
+      AI_EMBEDDING_MODEL: ${AI_EMBEDDING_MODEL:-}
+      UPLOAD_DIR: /app/data/uploads
+    ports:
+      - "${SERVER_PORT:-8080}:8080"
+    volumes:
+      - app-data:/app/data
+
 volumes:
   mysql-data:
   redis-data:
   rabbitmq-data:
+  app-data:

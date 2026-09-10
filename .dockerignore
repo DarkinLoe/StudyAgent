@@ -1,0 +1,17 @@
+# 构建镜像时排除本地/无关内容，避免把几百 MB 的 Maven 缓存打进上下文
+target/
+.m2/
+data/
+.git/
+.github/
+.idea/
+.vscode/
+*.iml
+*.log
+.env
+docs/
+scripts/
+HELP.md
+README.md
+docker-compose.yml
+Dockerfile
