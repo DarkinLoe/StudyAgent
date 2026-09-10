@@ -1,14 +1,16 @@
 # StudyAgent —— 个人学习 Agent（DDD 单体，单 Agent）
 
 基于 **Spring Boot 4.1 / Java 21 / Maven / MySQL / Redis / RabbitMQ(可选) / Spring AI(OpenAI 兼容)** 的
-个人学习 Agent 后端骨架。当前为**单 Agent** 实现：一个统一「学习 Agent」问答入口，自动使用个人 RAG 知识库回答，
-外部扩展点（planner/teacher/reviewer 等）可在此架构上演进为多 Agent。
+个人学习 Agent 后端。当前为**单 Agent** 实现：一个统一「学习 Agent」问答入口，自动使用个人 RAG 知识库回答，
+并可通过**工具调用（function calling）**真正操作学习数据（记错题、查今日计划）；
+外部扩展点（planner/teacher/reviewer、MCP、多 Agent）可在此架构上演进。
 
 ## 一、功能（对应需求）
 
 | 需求 | 落地 |
 | --- | --- |
-| 个人 RAG 库：课程表 / 学习安排 / PPT / 题目等，并从中提取学习内容 | `/api/rag/**`：上传文档（PDF/PPT(X)/Word/Excel/TXT/MD）→ Tika 解析 → 分块 → Embedding → 向量检索；`/api/notes/auto-from-document` 一键生成学习整理，`/api/questions/from-document` 一键出题 |
+| 个人 RAG 库：课程表 / 学习安排 / PPT / 题目等，并从中提取学习内容 | `/api/rag/**`：上传文档（PDF/PPT(X)/Word/Excel/TXT/MD）→ Tika 解析 → 分块 → Embedding → 向量检索；**按用户隔离检索**、**启动自动重建索引**、**无 Embedding 能力时关键词降级**；`/api/notes/auto-from-document` 一键学习整理，`/api/questions/from-document` 一键出题 |
+| 单 Agent 工具调用（function calling） | `AgentSkill` 契约 + 技能（`register_wrong_question` 记错题、`query_today_plan` 查今日安排）；显式工具循环：≤3 轮上限、重复调用检测、失败文本回填、跨轮 token 累计 |
 | 基础问答式教学；创建题库与错题整理 | `/api/agent/chat` 教学问答（RAG + 会话历史）；`/api/banks` 题库、`/api/questions` 题目、`/api/wrongs` 错题本（自动判分沉淀错题） |
 | 学习计划；按学习时间与内容自动提示 | `/api/plans/**` 计划与任务；`StudyReminderJob` 每分钟扫描到期任务生成提醒（`/api/reminders`），可选 MQ 推送 |
 | 知识管理：学习整理、自动笔记与学习分析 | `/api/notes/**`（手动 + 会话/文档自动整理）；`/api/analytics/learning` 统计与 `/learning/summary` AI 文字分析 |
@@ -23,6 +25,7 @@
 - Spring Data Redis（缓存：今日任务/未读提醒数/待复习错题数等，带 TTL）
 - Spring AMQP + RabbitMQ（**默认关闭**；开启后文档摄入与提醒推送走队列，关闭则同步回退）
 - Spring AI（OpenAI 兼容端点）＋ Apache Tika（文档解析）
+- Docker / docker compose（MySQL+Redis+RabbitMQ，可选一键起应用本体）· GitHub Actions（CI：测试+打包）
 
 目录按 DDD 分层（详见 [docs/architecture.md](docs/architecture.md)）：
 
@@ -97,6 +100,20 @@ $env:STUDY_AGENT_MQ_ENABLED='true'
 
 开启后：上传文档 → 发布摄入任务 → 消费者异步解析索引；学习提醒另发提醒队列。关闭时文档摄入在当前线程同步完成。
 
+### 6. 一键容器化运行（可选）
+
+```bash
+docker compose --profile app up -d --build   # 中间件 + 应用本体一起起（应用镜像多阶段构建）
+```
+
+### 7. 冒烟验证
+
+应用启动后执行（覆盖 health / RAG 降级检索 / 计划与今日学习 / 题库判分入错题本 / 学习分析 / 未读提醒）：
+
+```powershell
+.\scripts\smoke-test.ps1
+```
+
 ## 四、主要 API
 
 统一响应 `{code,message,data}`，业务错误码见 `shared/exception/ErrorCode.java`。
@@ -126,17 +143,42 @@ $env:STUDY_AGENT_MQ_ENABLED='true'
 ## 五、验证
 
 ```bash
-.\scripts\mvn.ps1 test          # 单元测试（分块器/判分器）
+.\scripts\mvn.ps1 test                  # 单元测试（分块器/判分器/工具参数归一化/关键词片段抽取）
 .\scripts\mvn.ps1 -DskipTests package   # 打 jar
 java -jar target\StudyAgent-0.0.1-SNAPSHOT.jar
+.\scripts\smoke-test.ps1                # 端到端冒烟（需应用已启动）
 ```
 
-## 六、说明与取舍（脚手架阶段）
+CI：`.github/workflows/ci.yml` 在 push/PR 时执行 `./mvnw test` + `package`。
+
+## 六、真实启动踩坑记录（编译与单测发现不了）
+
+1. **Boot 4 默认 Jackson 3，项目仍用 Jackson 2**：容器里没有 `com.fasterxml.jackson.databind.ObjectMapper` Bean，
+   注入失败。当前由 `JacksonConfig` 显式提供过渡 Bean（含 `JavaTimeModule`），后续应统一迁移到 Jackson 3。
+2. **领域仓储接口签名与 Spring Data 内建方法冲突**：`void saveAll(List<PlanTask>)` 与 `JpaRepository.saveAll(Iterable)`
+   不匹配，被 Spring Data 当作派生查询解析而启动失败——已删除冗余声明。
+3. **Spring Data Redis 仓储扫描**：`spring.data.redis.repositories.enabled=false`，避免启动刷
+   "Could not safely identify store assignment" 日志。
+
+> 教训：Agent/后端类项目必须**至少真实启动一次**，编译通过与单测全绿都替代不了它。
+
+## 七、说明与取舍
 
 - 表结构由 Hibernate `ddl-auto=update` 自动生成；生产建议切 Flyway + `validate`。
 - 安全默认全放行；接入登录后收紧 `/api/**` 并做用户体系（现仅 `X-User-Id` 头）。
 - 实体即聚合（JPA 注解落在领域对象上并保留行为方法）；后续如需严格分离持久化模型可加映射层。
 - 领域仓储接口部分方法使用 Spring Data 分页类型，属务实取舍。
 - RabbitMQ 关闭时无任何连接尝试；开启但 Rabbit 不在线仅记录日志，不影响主流程。
+- 向量检索为进程内 `SimpleVectorStore`：启动时按 `text_content` 重建；用户隔离在适配器内按元数据过滤，
+  换成 pgvector 等可下推为服务端过滤。
+
+## 八、后续演进（Roadmap）
+
+1. 统一迁移到 Jackson 3，删除过渡配置；
+2. 登录体系（JWT/OAuth2）替换 `X-User-Id`，向量库检索按真实租户隔离；
+3. 向量库持久化（pgvector/Redis Vector）+ 增量索引；
+4. MCP：把学习能力暴露为 MCP Server / 接入外部 MCP 工具；
+5. 多 Agent 编排（planner/teacher/reviewer）与流式输出（SSE）；
+6. 数据库迁移改 Flyway + 集成测试（Testcontainers）。
 
 更多设计细节见 [docs/architecture.md](docs/architecture.md)。

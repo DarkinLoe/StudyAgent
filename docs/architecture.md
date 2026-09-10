@@ -76,11 +76,52 @@ POST /api/agent/chat {content, sessionId?}
 计划数/进行中数、任务完成率、计划 vs 已投入分钟（近 7 天）、错题三态计数、笔记数、
 最近 100 条错题聚合出 Top5 高频知识点标签；`summarize()` 由 LLM 生成 200 字内改进建议。
 
-## 7. 已知边界与后续演进
+## 7. Agent 工具循环（function calling）
 
-1. 多 Agent：AgentChat 抽象为 persona 工厂 + 工具调用（function calling），拆分 planner/teacher/reviewer；
-2. 向量库持久化：pgvector/Redis 等替换进程内 SimpleVectorStore，并按用户隔离检索；
-3. 用户体系：JWT/OAuth2 替换 `X-User-Id`，错题/计划/文档全部按真实用户分片；
-4. 数据库迁移：引入 Flyway + `ddl-auto=validate`；
-5. 课程表→学习计划：解析课程表后按周模板批量生成 PlanTask（目前提供上传+检索+人工建计划）；
-6. 通知渠道：提醒 MQ 事件接入站内信/邮件。
+应用层契约 `AgentSkill`（name / description / parametersJsonSchema / execute），
+基础设施层 `SkillToolCallback` 适配为 Spring AI 的 `ToolCallback`——**应用层不依赖任何 LLM 框架类型**。
+
+采用**显式工具循环**（不依赖框架自动执行，便于观测与控制），位于 `OpenAiChatAdapter`：
+模型返回 tool_call → 记录日志 → 执行技能 → 以 `ToolResponseMessage` 回填 → 再次调用，
+直到模型不再返回 tool_call 或达到轮数上限。
+
+四层防御：
+
+1. **提示词规则**（`AIPrompts.toolGuide`）：何时该用/不该用工具、不要重复调用、失败按建议处理；
+2. **轮数上限** `MAX_TOOL_ROUNDS=3`：用尽则取最后一次文本，否则返回兜底话术；
+3. **重复调用检测**：`ToolArgsNormalizer` 对参数 JSON 递归键排序生成指纹，命中则不重复执行并提示模型收尾；
+4. **失败文本化**：技能异常被转换为失败文本回填（可恢复给修正建议；不可恢复明确禁止重试），循环不中断。
+
+## 8. RAG 加固
+
+- **检索隔离**：向量元数据写入 `userId`；`SpringAiVectorIndexAdapter.search` 多取候选后按 userId 过滤，
+  保证只能命中本人知识库（换 pgvector 可下推为服务端 filter）。
+- **启动重建**：进程内 `SimpleVectorStore` 重启即失效 → `RagIndexBootstrapRunner` 用文档已保存的
+  `text_content` 重新向量化（不重新解析文件）；可用 `study-agent.rag.reindex-on-startup=false` 关闭；
+  单篇失败只告警，不影响启动。
+- **关键词降级**：`KnowledgeKeywordSearchService` + `KeywordSnippetExtractor` 在向量检索异常或无命中时
+  按关键词匹配解析文本（score = 命中词占比，仅用于排序），避免"供应商无 embedding"导致整链路失败。
+- 文档状态机仍为 PENDING → PROCESSING → INDEXED/FAILED，失败可 `/reindex` 重试。
+
+## 9. 部署与验证
+
+- **镜像**：多阶段 `Dockerfile`（maven 构建层 + temurin-21 JRE 运行层）；
+  `docker compose --profile app up -d --build` 一键起中间件 + 应用本体。
+- **冒烟**：`scripts/smoke-test.ps1` 覆盖 health、RAG 降级检索、计划/今日学习(Redis)、
+  题库判分→错题本、学习分析、未读提醒；有失败项则以非 0 退出。
+- **CI**：`.github/workflows/ci.yml`（JDK 21 + `./mvnw test` + package）。
+- **真实启动踩坑记录**：① Boot 4 默认 Jackson 3，项目仍用 Jackson 2，需显式 `ObjectMapper` Bean 过渡；
+  ② 领域仓储接口签名必须兼容 Spring Data 内建方法（`saveAll` 曾因签名不匹配被当作派生查询解析而启动失败）；
+  ③ Spring Data Redis 仓储扫描需关闭（`spring.data.redis.repositories.enabled=false`）。
+  **结论：编译通过与单测全绿都不能替代"至少真实启动一次"。**
+
+## 10. 已知边界与后续演进
+
+1. 多 Agent 编排：把当前单 Agent 拆为 planner/teacher/reviewer（技能与端口已就绪）；
+2. 统一迁移到 Jackson 3，删除过渡配置；
+3. 向量库持久化与增量索引（pgvector/Redis Vector），租户过滤下推到服务端；
+4. 用户体系：JWT/OAuth2 替换 `X-User-Id`，错题/计划/文档按真实用户分片；
+5. 数据库迁移：Flyway + `ddl-auto=validate`，集成测试引入 Testcontainers；
+6. 课程表 → 学习计划：解析后按周模板批量生成 PlanTask；
+7. MCP：将学习能力暴露为 MCP Server，或接入外部 MCP 工具；
+8. 流式输出（SSE）与通知渠道（站内信/邮件）。
