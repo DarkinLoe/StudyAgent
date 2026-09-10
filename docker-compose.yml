@@ -94,6 +94,20 @@ services:
     volumes:
       - app-data:/app/data
 
+  # ---------------- 前端（Vue3 + Vite 构建，Nginx 托管并反代后端） ----------------
+  # 用法：docker compose --profile app up -d --build
+  # 访问：http://localhost:8081/（Nginx 内部把 /api、/actuator 反代到 app:8080）
+  web:
+    profiles: ["app"]
+    build:
+      context: ./frontend
+    container_name: study-agent-web
+    restart: unless-stopped
+    depends_on:
+      - app
+    ports:
+      - "${WEB_PORT:-8081}:80"
+
 volumes:
   mysql-data:
   redis-data:
