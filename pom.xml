@@ -83,6 +83,11 @@
         </dependency>
 
         <!-- ===================== 工具 ===================== -->
+        <!-- Boot 4 默认提供 Jackson 3（tools.jackson）；本项目显式使用 Jackson 2，故声明依赖 -->
+        <dependency>
+            <groupId>com.fasterxml.jackson.core</groupId>
+            <artifactId>jackson-databind</artifactId>
+        </dependency>
         <dependency>
             <groupId>com.fasterxml.jackson.datatype</groupId>
             <artifactId>jackson-datatype-jsr310</artifactId>

@@ -11,8 +11,6 @@ public interface PlanTaskRepository {
 
     PlanTask save(PlanTask task);
 
-    void saveAll(List<PlanTask> tasks);
-
     Optional<PlanTask> findById(Long id);
 
     Optional<PlanTask> findByIdAndPlanId(Long id, Long planId);

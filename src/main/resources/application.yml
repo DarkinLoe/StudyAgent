@@ -32,6 +32,10 @@ spring:
       password: ${REDIS_PASSWORD:}
       database: ${REDIS_DATABASE:0}
       timeout: 3s
+      repositories:
+        # 我们用 Redis 做缓存（RedisCacheHelper），不使用 Spring Data Redis Repository，
+        # 关闭其扫描可避免启动日志里“Could not safely identify store assignment”刷屏
+        enabled: false
 
   # ---------------- RabbitMQ ----------------
   rabbitmq:
