@@ -1,5 +1,6 @@
 package studio.lingrui.studyagent.application.agent;
 
+import studio.lingrui.studyagent.application.agent.skill.AgentSkill;
 import studio.lingrui.studyagent.domain.rag.RetrievedChunk;
 
 import java.util.List;
@@ -52,6 +53,27 @@ public final class AIPrompts {
                     引用规则：引用上述资料时说明出处；若资料与问题无关则忽略并提示。
                     """);
         }
+        return sb.toString();
+    }
+
+    /**
+     * 工具使用说明：追加到系统提示，告诉模型有哪些技能、什么时候用、什么时候别用。
+     * 工具的 JSON Schema 由模型请求侧携带，这里补充"行为规则"。
+     */
+    public static String toolGuide(List<AgentSkill> skills) {
+        StringBuilder sb = new StringBuilder("""
+
+                你可以调用以下工具（由系统代为执行，执行结果会返回给你；不要编造执行结果）：
+                """);
+        for (AgentSkill skill : skills) {
+            sb.append("- ").append(skill.name()).append("：").append(skill.description()).append('\n');
+        }
+        sb.append("""
+                工具使用规则：
+                1. 只有当用户意图明确对应某个工具时才调用；纯知识讲解、闲聊、解释概念时不要调用。
+                2. 同一工具、同一参数不要重复调用；工具结果已足够时，直接给出最终回答。
+                3. 工具返回失败时，按失败信息中的建议处理：可修正的重试一次，不可恢复的直接向用户说明，不要反复重试。
+                """);
         return sb.toString();
     }
 
