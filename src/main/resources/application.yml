@@ -57,10 +57,14 @@ spring:
       base-url: ${AI_BASE_URL:https://api.openai.com/v1}
       api-key: ${AI_API_KEY:sk-not-configured}
       chat:
+        # 注意：Spring AI 2.0 生效的是扁平属性 chat.model；
+        # 同时保留 options.model 兼容 1.x 写法（两处取值相同，避免版本差异导致配置失效）
+        model: ${AI_CHAT_MODEL:gpt-4o-mini}
         options:
           model: ${AI_CHAT_MODEL:gpt-4o-mini}
           temperature: 0.7
       embedding:
+        model: ${AI_EMBEDDING_MODEL:text-embedding-3-small}
         options:
           model: ${AI_EMBEDDING_MODEL:text-embedding-3-small}
 
