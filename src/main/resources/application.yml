@@ -122,6 +122,11 @@ management:
     web:
       exposure:
         include: health,info,metrics
+  health:
+    rabbit:
+      # MQ 关闭时不要探测 RabbitMQ：否则本地/未部署 Rabbit 的环境里 /actuator/health 永远 DOWN(503)，
+      # 健康检查就失去了意义（探针会把一个功能完好的实例判死）
+      enabled: ${STUDY_AGENT_MQ_ENABLED:false}
 
 # ---------------- 日志 ----------------
 # appender 与滚动策略见 src/main/resources/logback-spring.xml；

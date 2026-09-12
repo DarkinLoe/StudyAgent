@@ -19,8 +19,15 @@ if (-not (Test-Path $mavenCmd)) {
 Push-Location $root
 try {
     $argList = @("-Dmaven.repo.local=$repoLocal") + $MvnArgs
+    # 调用外部进程时不能用 $ErrorActionPreference='Stop'：
+    # Windows PowerShell 5.1 会把原生命令写到 stderr 的**警告**（例如 Maven 里
+    # "Mockito is currently self-attaching..."）包装成终止性错误，脚本会在构建成功
+    # 的情况下直接中断退出。判断成败只应看 $LASTEXITCODE。
+    $ErrorActionPreference = 'Continue'
     & $mavenCmd @argList
-    exit $LASTEXITCODE
+    $exitCode = $LASTEXITCODE
+    Write-Output "[mvn.ps1] maven exit code: $exitCode"
+    exit $exitCode
 }
 finally {
     Pop-Location

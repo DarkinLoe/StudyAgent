@@ -273,6 +273,19 @@ CI：`.github/workflows/ci.yml` 在 push/PR 时执行 `./mvnw test` + `package`�
     「SETNX 加锁 + 直接 DEL 解锁」会误删他人重新获取的锁（改 Lua 比对持有者 token）。
 11. **固定窗口限流的永久锁死**：先 INCR 再 EXPIRE 是两条命令，EXPIRE 失败时 key 没有 TTL，
    该用户被永久限流。修复：清理/计数/写入收敛进一段 Lua 原子执行（滑动窗口）。
+12. **MQ 关闭时健康检查仍然探测 RabbitMQ**：`study-agent.mq.enabled=false` 只是不启消费者，
+   `RabbitHealthIndicator` 照样去连 5672，连不上就把整体状态判成 DOWN(503)——
+   一个功能完好的实例会被编排探针判死。修复：`management.health.rabbit.enabled` 跟随 MQ 开关。
+13. **PowerShell 5.1 按本地代码页读取无 BOM 的 `.ps1`**：脚本里的中文字符串被解成乱码后
+   直接语法报错（`smoke-test.ps1` 报 `Missing ']' after array index expression`）。
+   修复：`scripts/*.ps1` 写入 UTF-8 BOM，PS 5.1 与 PowerShell 7 均可正常解析。
+14. **环境里 `java`/`javac` 指向 `javapath` 垫片会直接崩溃**（`0xC0000409`），
+   而 Maven 内部的 JVM 正常——直接用 JDK 全路径（如
+   `C:\Program Files\Microsoft\jdk-21.0.7.6-hotspot\bin`）即可绕过。
+15. **`mvn.ps1` 里 `$ErrorActionPreference='Stop'` + 原生命令 stderr**：Windows PowerShell 5.1
+   会把 `mvn.cmd` 写到 stderr 的**警告**（如 "Mockito is currently self-attaching..."）当成
+   终止性错误，导致**构建明明成功、脚本却中断退出**。修复：调用外部进程前把 prefer 设为
+   `Continue`，成败只依据 `$LASTEXITCODE`，并把退出码打印出来。
 
 > 教训：Agent/后端类项目必须**至少真实启动一次**，编译通过与单测全绿都替代不了它；
 > 而且"配置不生效"这类问题，往往要靠**把真实生效值打出来**（列类型、容器环境变量、实际请求参数）才能定位。
