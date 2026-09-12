@@ -1,8 +1,8 @@
 name: study-agent
 
-# 学习 Agent 本地开发依赖：MySQL 8 + Redis 7 + RabbitMQ 4(带管理台)
-# 用法：docker compose up -d
-# 环境变量可用 .env 覆盖（参见 README）
+# 瀛︿範 Agent 鏈湴寮€鍙戜緷璧栵細MySQL 8 + Redis 7 + RabbitMQ 4(甯︾鐞嗗彴)
+# 鐢ㄦ硶锛歞ocker compose up -d
+# 鐜鍙橀噺鍙敤 .env 瑕嗙洊锛堝弬瑙?README锛?
 
 services:
   mysql:
@@ -50,7 +50,7 @@ services:
       RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:-guest}
     ports:
       - "${RABBITMQ_PORT:-5672}:5672"      # AMQP
-      - "${RABBITMQ_MGMT_PORT:-15672}:15672" # 管理台 http://localhost:15672
+      - "${RABBITMQ_MGMT_PORT:-15672}:15672" # 绠＄悊鍙?http://localhost:15672
     volumes:
       - rabbitmq-data:/var/lib/rabbitmq
     healthcheck:
@@ -59,9 +59,9 @@ services:
       timeout: 10s
       retries: 10
 
-  # ---------------- 应用本体（可选 profile） ----------------
-  # 用法：docker compose --profile app up -d --build
-  # 不启用 profile 时只起中间件，应用仍可用 mvn spring-boot:run 在宿主机运行
+  # ---------------- 搴旂敤鏈綋锛堝彲閫?profile锛?----------------
+  # 鐢ㄦ硶锛歞ocker compose --profile app up -d --build
+  # 涓嶅惎鐢?profile 鏃跺彧璧蜂腑闂翠欢锛屽簲鐢ㄤ粛鍙敤 mvn spring-boot:run 鍦ㄥ涓绘満杩愯
   app:
     profiles: ["app"]
     build:
@@ -88,9 +88,9 @@ services:
       AI_API_KEY: ${AI_API_KEY:-sk-not-configured}
       AI_CHAT_MODEL: ${AI_CHAT_MODEL:-deepseek-chat}
       AI_EMBEDDING_MODEL: ${AI_EMBEDDING_MODEL:-}
-      # 直接用 Spring Boot 环境变量覆盖 Spring AI 配置（relaxed binding）：
-      # 好处是改模型/密钥不必重新构建镜像（application.yml 是打包进 jar 的）。
-      # 同时覆盖扁平属性 chat.model 与嵌套写法 chat.options.model，避免版本差异导致静默失效。
+      # 鐩存帴鐢?Spring Boot 鐜鍙橀噺瑕嗙洊 Spring AI 閰嶇疆锛坮elaxed binding锛夛細
+      # 濂藉鏄敼妯″瀷/瀵嗛挜涓嶅繀閲嶆柊鏋勫缓闀滃儚锛坅pplication.yml 鏄墦鍖呰繘 jar 鐨勶級銆?
+      # 鍚屾椂瑕嗙洊鎵佸钩灞炴€?chat.model 涓庡祵濂楀啓娉?chat.options.model锛岄伩鍏嶇増鏈樊寮傚鑷撮潤榛樺け鏁堛€?
       SPRING_AI_OPENAI_BASE_URL: ${AI_BASE_URL:-https://api.deepseek.com}
       SPRING_AI_OPENAI_API_KEY: ${AI_API_KEY:-sk-not-configured}
       SPRING_AI_OPENAI_CHAT_MODEL: ${AI_CHAT_MODEL:-deepseek-chat}
@@ -98,16 +98,20 @@ services:
       SPRING_AI_OPENAI_EMBEDDING_MODEL: ${AI_EMBEDDING_MODEL:-text-embedding-3-small}
       SPRING_AI_OPENAI_EMBEDDING_OPTIONS_MODEL: ${AI_EMBEDDING_MODEL:-text-embedding-3-small}
       UPLOAD_DIR: /app/data/uploads
+      # 鏃ュ織鐩綍涓庣骇鍒紙logback-spring.xml 璇诲彇锛夛紱鏃ュ織鎸佷箙鍖栧埌 app-logs 鍗?
+      LOG_DIR: /app/logs
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
     ports:
       - "${SERVER_PORT:-8080}:8080"
     volumes:
       - app-data:/app/data
-      # 外部化配置：优先级高于 jar 内 application.yml，改模型/密钥无需重新构建镜像
+      - app-logs:/app/logs
+      # 澶栭儴鍖栭厤缃細浼樺厛绾ч珮浜?jar 鍐?application.yml锛屾敼妯″瀷/瀵嗛挜鏃犻渶閲嶆柊鏋勫缓闀滃儚
       - ./docker/app-config/application.yml:/app/config/application.yml:ro
 
-  # ---------------- 前端（Vue3 + Vite 构建，Nginx 托管并反代后端） ----------------
-  # 用法：docker compose --profile app up -d --build
-  # 访问：http://localhost:8081/（Nginx 内部把 /api、/actuator 反代到 app:8080）
+  # ---------------- 鍓嶇锛圴ue3 + Vite 鏋勫缓锛孨ginx 鎵樼骞跺弽浠ｅ悗绔級 ----------------
+  # 鐢ㄦ硶锛歞ocker compose --profile app up -d --build
+  # 璁块棶锛歨ttp://localhost:8081/锛圢ginx 鍐呴儴鎶?/api銆?actuator 鍙嶄唬鍒?app:8080锛?
   web:
     profiles: ["app"]
     build:
@@ -124,3 +128,4 @@ volumes:
   redis-data:
   rabbitmq-data:
   app-data:
+  app-logs:
