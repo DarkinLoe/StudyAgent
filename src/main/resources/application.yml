@@ -160,3 +160,7 @@ study-agent:
     poll-cron: "0 * * * * *"
   cache:
     default-ttl: 10m
+  # Flyway 迁移自愈：启动时先 repair（清理失败迁移记录、对齐校验和）再 migrate，
+  # 这样"曾经失败的迁移 + 被修正过的脚本"能自动收敛，不必手工进库删记录
+  flyway:
+    repair-on-startup: true

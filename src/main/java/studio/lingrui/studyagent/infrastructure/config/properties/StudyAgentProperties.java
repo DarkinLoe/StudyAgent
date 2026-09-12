@@ -21,6 +21,7 @@ public class StudyAgentProperties {
     private Mq mq = new Mq();
     private Reminder reminder = new Reminder();
     private Cache cache = new Cache();
+    private Flyway flyway = new Flyway();
 
     @Data
     public static class User {
@@ -93,5 +94,15 @@ public class StudyAgentProperties {
     public static class Cache {
         /** 默认缓存 TTL */
         private Duration defaultTtl = Duration.ofMinutes(10);
+    }
+
+    @Data
+    public static class Flyway {
+        /**
+         * 启动时先 repair 再 migrate。
+         * repair 会清理 flyway_schema_history 里的失败迁移记录并对齐校验和，
+         * 使"曾经跑失败/脚本被修正过"的迁移能重新收敛；健康库上是 no-op。
+         */
+        private boolean repairOnStartup = true;
     }
 }
