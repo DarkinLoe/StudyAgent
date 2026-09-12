@@ -1,8 +1,11 @@
 package studio.lingrui.studyagent.infrastructure.web;
 
+import studio.lingrui.studyagent.shared.exception.BizException;
+import studio.lingrui.studyagent.shared.exception.ErrorCode;
+
 /**
  * 当前请求用户上下文（ThreadLocal）。
- * 登录体系上线前通过请求头 X-User-Id 指定用户，缺省用配置里的默认用户。
+ * 由 {@code JwtAuthFilter} 在认证成功后写入；业务代码通过 {@link #getUserId()} 获取当前用户。
  */
 public final class UserContext {
 
@@ -15,9 +18,20 @@ public final class UserContext {
         USER_ID.set(userId);
     }
 
+    /**
+     * 当前登录用户 id；未认证时抛 401（避免"静默当成默认用户"导致越权）。
+     */
     public static Long getUserId() {
         Long id = USER_ID.get();
-        return id == null ? 1L : id;
+        if (id == null) {
+            throw new BizException(ErrorCode.UNAUTHORIZED, "未登录或登录已过期");
+        }
+        return id;
+    }
+
+    /** 不抛异常的读取（日志、监控等非业务场景用） */
+    public static Long peekUserId() {
+        return USER_ID.get();
     }
 
     public static void clear() {

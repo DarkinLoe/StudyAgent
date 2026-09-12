@@ -14,6 +14,8 @@ import java.util.List;
 public class StudyAgentProperties {
 
     private User user = new User();
+    private Security security = new Security();
+    private RateLimit rateLimit = new RateLimit();
     private FileProp file = new FileProp();
     private Rag rag = new Rag();
     private Mq mq = new Mq();
@@ -24,6 +26,28 @@ public class StudyAgentProperties {
     public static class User {
         /** 登录体系上线前的默认用户 id */
         private Long defaultUserId = 1L;
+    }
+
+    @Data
+    public static class Security {
+        /** JWT 签名密钥（HS256，要求 >=32 字节）；为空则启动时生成临时随机密钥 */
+        private String jwtSecret = "";
+        /** token 有效期（分钟），默认 12 小时 */
+        private long tokenTtlMinutes = 720;
+        /** 定时任务是否使用 Redis 分布式锁（多实例部署时防重复执行） */
+        private boolean distributedJobLock = true;
+    }
+
+    @Data
+    public static class RateLimit {
+        /** 是否开启限流 */
+        private boolean enabled = true;
+        /** 对话接口：每用户每分钟最多请求数 */
+        private int chatPerMinute = 20;
+        /** 上传接口：每用户每分钟最多请求数 */
+        private int uploadPerMinute = 10;
+        /** 登录接口：每 IP 每分钟最多尝试数（防爆破） */
+        private int loginPerMinute = 10;
     }
 
     @Data
