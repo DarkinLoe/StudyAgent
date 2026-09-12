@@ -32,6 +32,7 @@
 | plan | StudyPlan + PlanTask / StudyReminder | 计划、任务（日期+时段+时长）、提醒记录（调度生成） |
 | rag | KnowledgeDocument | 文档元数据+解析纯文本+索引状态机 PENDING→PROCESSING→INDEXED/FAILED |
 | knowledge | StudyNote | 手动 / AUTO（来源 session:或 doc:） |
+| auth | User | 账号（BCrypt 口令哈希、启用开关）；令牌与吊销在基础设施层（JwtService/TokenBlacklist） |
 
 典型状态机：文档 `PENDING → PROCESSING → INDEXED | FAILED`（摄入失败可 `/reindex` 重试）。
 
@@ -40,28 +41,41 @@
 ```
 POST /api/agent/chat {content, sessionId?}
    │
-   ├─ 1. 会话：无 sessionId 自动建会话；标题取首条消息
-   ├─ 2. 历史：取该会话最近 10 条（MySQL）
-   ├─ 3. 检索：query → EmbeddingModel → SimpleVectorStore topK（个人知识库）
-   ├─ 4. 组装：System(人设+检索资料) + 历史 + 当前问题
-   ├─ 5. 调用：ChatModel（OpenAI 兼容，ChatClient/ChatModel）
-   └─ 6. 落库：USER/ASSISTANT 两条消息；引用(json)写入 ASSISTANT 消息；更新会话时间
+   ├─ 1. 短事务：会话（无 sessionId 自动建）；标题取首条消息
+   ├─ 2. 短事务：历史取该会话「最近 10 条」（按 id 倒序取再反转），并落 USER 消息 → 提交
+   ├─ 3. 事务外：query → EmbeddingModel → SimpleVectorStore topK（个人知识库，按 userId 过滤）
+   ├─ 4. 组装：System(人设+检索资料+工具规则) + 历史 + 当前问题
+   ├─ 5. 事务外：调用 ChatModel（OpenAI 兼容）—— 慢操作绝不占用数据库连接
+   └─ 6. 短事务：ASSISTANT 消息落库（引用 json + token 用量）；更新会话时间
 ```
 
 设计要点：会话状态在 MySQL（不依赖模型 provider 的会话内存），利于多端同步与笔记/分析复用；
-向量检索失败自动降级为“无资料回答”并提示上传资料，模型调用失败返回 `AI_UNAVAILABLE(2202)`。
+**事务边界显式切成三段**（`TransactionTemplate`），否则一次对话会独占一条数据库连接直到模型返回，
+连接池很快被耗尽管并拖垮全站；向量检索失败自动降级为关键词检索，
+模型调用失败返回 `AI_UNAVAILABLE(2202)`（HTTP 503）。
 
-## 4. 缓存与消息
+## 4. 缓存、限流与消息
 
-- **Redis**（`RedisCacheHelper`：StringRedisTemplate + JSON 值，避免泛型序列化类型坑）：
+- **Redis**（应用层定义 `CachePort`，基础设施 `RedisCacheAdapter` 实现：StringRedisTemplate + JSON 值）：
   - `cache:todayTasks:{userId}`：今日/逾期学习清单，TTL 30s，计划任务写操作即失效
   - `cache:reminderUnread:{userId}`、`cache:wrongPending:{userId}`：常用计数，TTL 10m，写后按用户失效
-  - Redis 不可用时降级直查数据库，不阻塞主流程
-- **RabbitMQ**（`study-agent.mq.enabled=false` 默认关闭）：
+  - `cache:user:id:{userId}`：**用户资料快照**（`UserSnapshot`，不含 passwordHash），TTL 5m；
+    登录凭证刻意不进缓存，避免"改密/封禁在 TTL 内不生效"
+  - 前缀失效用 **SCAN 游标分批删除**（不用会阻塞 Redis 的 `KEYS`）；
+  - Redis 不可用时全部降级（读空/写丢/锁放行），不阻塞主流程
+- **分布式锁**（`CachePort.tryLock`）：SETNX + 持有者 token，释放时用 Lua 比对 token 再 DEL，
+  避免"锁过期被他人重新获取后又被前一个实例删掉"；用于多实例下的定时提醒任务串行化。
+- **限流**（`RateLimitFilter`）：Redis ZSet + Lua 原子滑动窗口（1 分钟），
+  对话/上传按用户、登录按**真实客户端 IP**（取 `X-Forwarded-For` 最右段，防伪造绕过）。
+- **RabbitMQ**（`study-agent.mq.enabled=false` 默认关闭，应用层端口 `MqPort`）：
   - 关闭 → 文档摄入同步执行、提醒仅落库（无 MQ 也可完整运行）
   - 开启 → `study-agent.document.ingest` 队列异步摄入；`study-agent.reminder.push` 提醒事件
     （消费端当前占位日志，可扩展 WebSocket/邮件等通道）
-  - `listener.simple.auto-startup` 跟随开关，Rabbit 不在线不影响启动
+  - 消息体为 JSON（`DocumentIngestMessage` / `ReminderPushMessage` DTO，非 `Map`），
+    消费重试 3 次（指数退避）后经死信交换机进入 `study-agent.dead-letter`，
+    开启 publisher confirm/returns 便于发现"没发出去"；
+  - `listener.simple.auto-startup` 跟随开关，Rabbit 不在线不影响启动；
+  - 派发点在数据库写事务之外（上传先落库提交再发消息），避免消费者读不到文档。
 
 ## 5. 学习提示（自动提醒）机制
 
@@ -94,34 +108,56 @@ POST /api/agent/chat {content, sessionId?}
 
 ## 8. RAG 加固
 
-- **检索隔离**：向量元数据写入 `userId`；`SpringAiVectorIndexAdapter.search` 多取候选后按 userId 过滤，
-  保证只能命中本人知识库（换 pgvector 可下推为服务端 filter）。
+- **检索隔离**：向量元数据写入 `userId`；`SpringAiVectorIndexAdapter.search` **候选放大 20×（下限 100、上限 500）**
+  后再按 userId 过滤——候选太少时"前若干条恰好都是别人的文档"会被误判成无命中而错误降级（漏召）。
+  换 pgvector 可下推为服务端 filter，届时放大倍数即可取消。
+- **分块登记表**：适配器内维护 docId → chunkId 集合，删除文档时与 `chunkCount` 枚举取并集精确清理；
+  否则"上次索引中途失败"残留的分块永远删不掉，还会被检索命中。
 - **启动重建**：进程内 `SimpleVectorStore` 重启即失效 → `RagIndexBootstrapRunner` 用文档已保存的
-  `text_content` 重新向量化（不重新解析文件）；可用 `study-agent.rag.reindex-on-startup=false` 关闭；
-  单篇失败只告警，不影响启动。
+  `text_content` 重新向量化（不重新解析文件）。重建在**后台单线程**执行（不阻塞启动与健康检查），
+  期间检索结果可能不完整；可用 `study-agent.rag.reindex-on-startup=false` 关闭；单篇失败只告警。
 - **关键词降级**：`KnowledgeKeywordSearchService` + `KeywordSnippetExtractor` 在向量检索异常或无命中时
-  按关键词匹配解析文本（score = 命中词占比，仅用于排序），避免"供应商无 embedding"导致整链路失败。
-- 文档状态机仍为 PENDING → PROCESSING → INDEXED/FAILED，失败可 `/reindex` 重试。
+  按关键词匹配解析文本（score = 命中词占比，仅用于排序）。该路径**有界执行**：
+  SQL 侧按 id 倒序取最近 200 篇、单篇正文截断 10 万字符，避免"全量 longtext 进内存"的性能悬崖。
+- **解析加固**：抽取结果上限 2,000,000 字符（超出截断）、关闭 PDF 内联图片、上传体积上限可配
+  （`study-agent.file.max-file-size-mb`）；用 `WriteLimitReachedException.isWriteLimitReached` 区分截断与真失败。
+- 文档状态机仍为 PENDING → PROCESSING → INDEXED/FAILED，失败可 `/reindex` 重试；
+  摄入失败时 FAILED 状态与原因一定落库（派发与摄入都在事务之外执行）。
 
 ## 9. 部署与验证
 
 - **镜像**：多阶段 `Dockerfile`（maven 构建层 + temurin-21 JRE 运行层）；
   `docker compose --profile app up -d --build` 一键起中间件 + 应用本体。
-- **冒烟**：`scripts/smoke-test.ps1` 覆盖 health、RAG 降级检索、计划/今日学习(Redis)、
+- **单测**：`./mvnw test` 共 36 项，覆盖分块器/判分器/工具参数指纹/关键词片段、限流判定与客户端 IP 解析、
+  JWT 签发与吊销、异常到 HTTP 状态映射、Agent 编排（会话历史顺序 + 检索降级链，含回归守卫）。
+- **冒烟**：`scripts/smoke-test.ps1` 覆盖 health、登录/注册、RAG 降级检索、计划/今日学习(Redis)、
   题库判分→错题本、学习分析、未读提醒；有失败项则以非 0 退出。
-- **CI**：`.github/workflows/ci.yml`（JDK 21 + `./mvnw test` + package）。
-- **真实启动踩坑记录**：① Boot 4 默认 Jackson 3，项目仍用 Jackson 2，需显式 `ObjectMapper` Bean 过渡；
+- **CI**：`.github/workflows/ci.yml`（JDK 21 + `./mvnw test` + package；前端 `npm ci` + build）。
+- **真实启动踩坑记录**（详见 README 第七节）：
+  ① Boot 4 默认 Jackson 3，项目仍用 Jackson 2，需显式 `ObjectMapper` Bean 过渡；
   ② 领域仓储接口签名必须兼容 Spring Data 内建方法（`saveAll` 曾因签名不匹配被当作派生查询解析而启动失败）；
-  ③ Spring Data Redis 仓储扫描需关闭（`spring.data.redis.repositories.enabled=false`）。
+  ③ Spring Data Redis 仓储扫描需关闭（`spring.data.redis.repositories.enabled=false`）；
+  ④ 迁移脚本里的控制字符会让 Flyway 永久拒绝启动，需 repair→migrate 自愈；
+  ⑤ 大模型调用必须移出数据库事务，否则连接池会被慢请求吃干。
   **结论：编译通过与单测全绿都不能替代"至少真实启动一次"。**
 
 ## 10. 已知边界与后续演进
 
-1. 多 Agent 编排：把当前单 Agent 拆为 planner/teacher/reviewer（技能与端口已就绪）；
-2. 统一迁移到 Jackson 3，删除过渡配置；
-3. 向量库持久化与增量索引（pgvector/Redis Vector），租户过滤下推到服务端；
-4. 用户体系：JWT/OAuth2 替换 `X-User-Id`，错题/计划/文档按真实用户分片；
-5. 数据库迁移：Flyway + `ddl-auto=validate`，集成测试引入 Testcontainers；
-6. 课程表 → 学习计划：解析后按周模板批量生成 PlanTask；
-7. MCP：将学习能力暴露为 MCP Server，或接入外部 MCP 工具；
-8. 流式输出（SSE）与通知渠道（站内信/邮件）。
+**已知边界（当前未解决或有界降级）**
+
+1. 令牌存前端 `localStorage`（XSS 可窃取）；已补 jti 吊销与登出，但 HttpOnly Cookie + CSRF 未做；
+2. 关键词降级检索是有界扫描而非精确检索，根治要换倒排索引（MySQL FULLTEXT / ES）；
+3. 向量库不持久化，重启后后台重建，期间检索不完整；
+4. 上传解析无内容嗅探、无病毒扫描、无解析超时，解析在应用进程内进行；
+5. 多实例提醒任务用"Redis 锁 + @Version"防重复；进程在标记成功后、推送前崩溃会漏一条（需 outbox 补偿）；
+6. 没有集成测试 / Testcontainers，数据库与迁移行为依赖真实启动 + 冒烟脚本。
+
+**后续演进**
+
+1. 认证加固：HttpOnly Cookie + CSRF、刷新令牌、密码重置/封禁与缓存失效联动；
+2. 向量库持久化与增量索引（pgvector/Redis Vector），租户过滤下推到服务端；
+3. 多 Agent 编排：把当前单 Agent 拆为 planner/teacher/reviewer（技能与端口已就绪）；
+4. 课程表 → 学习计划：解析后按周模板批量生成 PlanTask；
+5. MCP：将学习能力暴露为 MCP Server，或接入外部 MCP 工具；
+6. 流式输出（SSE）与通知渠道（站内信/邮件）；
+7. 集成测试（Testcontainers）与迁移脚本回归；统一迁移到 Jackson 3。
