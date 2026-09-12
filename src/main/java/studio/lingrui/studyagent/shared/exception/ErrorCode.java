@@ -16,6 +16,7 @@ public enum ErrorCode {
     FORBIDDEN(1002, "无权限访问"),
     NOT_FOUND(1004, "资源不存在"),
     CONFLICT(1005, "资源状态冲突"),
+    TOO_MANY_REQUESTS(1006, "请求过于频繁，请稍后再试"),
     INTERNAL_ERROR(1500, "系统内部错误"),
 
     // 知识库 / RAG

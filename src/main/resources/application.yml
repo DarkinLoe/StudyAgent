@@ -1,5 +1,12 @@
 server:
   port: ${SERVER_PORT:8080}
+  # 并发相关：Tomcat 工作线程与排队容量（LLM 调用是慢请求，需足够的线程承接）
+  tomcat:
+    threads:
+      max: 200
+      min-spare: 20
+    accept-count: 200
+    max-connections: 8192
 
 spring:
   application:
@@ -11,8 +18,13 @@ spring:
     username: ${MYSQL_USERNAME:root}
     password: ${MYSQL_PASSWORD:root}
     hikari:
-      maximum-pool-size: 10
-      minimum-idle: 2
+      # 连接池：按"DB 连接数 = 服务实例数 × max-pool-size"估算，避免打爆 MySQL
+      maximum-pool-size: 20
+      minimum-idle: 5
+      connection-timeout: 3000
+      validation-timeout: 2000
+      max-lifetime: 1800000
+      keepalive-time: 300000
 
   # ---------------- JPA ----------------
   jpa:
@@ -23,6 +35,11 @@ spring:
     properties:
       hibernate:
         format_sql: false
+        # 批量写入：批量插入/更新时减少往返（结合 rewriteBatchedStatements=true 生效）
+        jdbc:
+          batch_size: 30
+        order_inserts: true
+        order_updates: true
 
   # ---------------- Redis ----------------
   data:

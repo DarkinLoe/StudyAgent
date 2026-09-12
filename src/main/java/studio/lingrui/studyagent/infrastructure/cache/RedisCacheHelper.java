@@ -63,4 +63,22 @@ public class RedisCacheHelper {
             log.warn("Redis 前缀删除失败 prefix={}: {}", prefix, e.getMessage());
         }
     }
+
+    /**
+     * 尝试获取分布式锁（SETNX + TTL），用于多实例部署时串行化定时任务。
+     * Redis 不可用时返回 true（放行），避免因缓存故障导致业务任务完全不执行。
+     */
+    public boolean tryLock(String key, Duration ttl) {
+        try {
+            return Boolean.TRUE.equals(redis.opsForValue().setIfAbsent(key, "1", ttl));
+        } catch (Exception e) {
+            log.warn("Redis 加锁失败 key={}（放行）: {}", key, e.getMessage());
+            return true;
+        }
+    }
+
+    /** 释放锁（仅用于"持锁者自己释放"的简单场景） */
+    public void unlock(String key) {
+        delete(key);
+    }
 }

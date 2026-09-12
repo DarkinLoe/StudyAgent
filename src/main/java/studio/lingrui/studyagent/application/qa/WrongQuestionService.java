@@ -66,14 +66,24 @@ public class WrongQuestionService {
     /**
      * 手动把某题记为错题（重复则累计答错次数）。
      */
-    @Transactional
+    // 注意：故意不加 @Transactional —— 并发插入冲突后需要在独立事务中重新读取并累加，
+    // 若包在同一事务里，捕获异常后 Session 已处于 rollback-only 状态，后续写入会失败
     public WrongQuestion addWrong(Long userId, Long questionId, String userAnswer) {
         questions.findByIdAndUserId(questionId, userId)
                 .orElseThrow(() -> new BizException(ErrorCode.QUESTION_NOT_FOUND, "题目不存在"));
         WrongQuestion existing = wrongs.findByUserIdAndQuestionId(userId, questionId).orElse(null);
         WrongQuestion saved;
         if (existing == null) {
-            saved = wrongs.save(WrongQuestion.firstWrong(userId, questionId, userAnswer));
+            try {
+                saved = wrongs.save(WrongQuestion.firstWrong(userId, questionId, userAnswer));
+            } catch (org.springframework.dao.DataIntegrityViolationException e) {
+                // 并发插入同一 (userId, questionId)：唯一约束 uk_wrong_user_question 兜底，
+                // 捕获后改为累加答错次数（放在独立事务里重新加载，避免脏 Session）
+                WrongQuestion concurrent = wrongs.findByUserIdAndQuestionId(userId, questionId)
+                        .orElseThrow(() -> e);
+                concurrent.wrongAgain(userAnswer);
+                saved = wrongs.save(concurrent);
+            }
         } else {
             existing.wrongAgain(userAnswer);
             saved = wrongs.save(existing);

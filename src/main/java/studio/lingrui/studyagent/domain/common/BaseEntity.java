@@ -7,6 +7,7 @@ import jakarta.persistence.Id;
 import jakarta.persistence.MappedSuperclass;
 import jakarta.persistence.PrePersist;
 import jakarta.persistence.PreUpdate;
+import jakarta.persistence.Version;
 import lombok.Getter;
 import lombok.Setter;
 
@@ -31,6 +32,13 @@ public abstract class BaseEntity {
 
     @Column(name = "updated_at", nullable = false)
     private LocalDateTime updatedAt;
+
+    /**
+     * 乐观锁版本号：并发修改同一行时，后提交者会收到 OptimisticLockException（返回 409/冲突提示），
+     * 而不是静默覆盖别人的更新。所有聚合统一享有该保护。
+     */
+    @Version
+    private Long version;
 
     @PrePersist
     void onCreate() {

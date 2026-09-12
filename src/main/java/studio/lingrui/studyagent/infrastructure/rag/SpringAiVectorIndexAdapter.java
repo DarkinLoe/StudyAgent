@@ -16,6 +16,8 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.locks.ReadWriteLock;
+import java.util.concurrent.locks.ReentrantReadWriteLock;
 
 /**
  * RAG 向量索引适配器：
@@ -30,6 +32,12 @@ public class SpringAiVectorIndexAdapter implements VectorIndexPort {
     private final EmbeddingModel embeddingModel;
 
     private volatile VectorStore store;
+
+    /**
+     * 向量库读写锁：SimpleVectorStore 内部是普通 Map，读（检索）与写（索引/删除）并发会读到不一致状态。
+     * 用读写锁让"多读并发、读写互斥"，在保证线程安全的同时不牺牲检索吞吐。
+     */
+    private final ReadWriteLock storeLock = new ReentrantReadWriteLock();
 
     private VectorStore store() {
         VectorStore s = this.store;
@@ -62,7 +70,12 @@ public class SpringAiVectorIndexAdapter implements VectorIndexPort {
             docs.add(new Document(docId + "#" + i, chunks.get(i), meta));
         }
         if (!docs.isEmpty()) {
-            store().add(docs);
+            storeLock.writeLock().lock();
+            try {
+                store().add(docs);
+            } finally {
+                storeLock.writeLock().unlock();
+            }
         }
         log.info("已索引文档 docId={} userId={} chunks={}", docId, userId, docs.size());
         return docs.size();
@@ -79,7 +92,12 @@ public class SpringAiVectorIndexAdapter implements VectorIndexPort {
             return;
         }
         try {
-            store().delete(ids);
+            storeLock.writeLock().lock();
+            try {
+                store().delete(ids);
+            } finally {
+                storeLock.writeLock().unlock();
+            }
         } catch (Exception e) {
             log.warn("删除向量块 docId={} 失败(忽略): {}", docId, e.getMessage());
         }
@@ -95,7 +113,13 @@ public class SpringAiVectorIndexAdapter implements VectorIndexPort {
                 .topK(fetch)
                 .similarityThreshold((float) minScore)
                 .build();
-        List<Document> hits = store().similaritySearch(request);
+        List<Document> hits;
+        storeLock.readLock().lock();
+        try {
+            hits = store().similaritySearch(request);
+        } finally {
+            storeLock.readLock().unlock();
+        }
         return hits.stream()
                 .filter(d -> userId == null || userId.equals(userIdOf(d.getMetadata())))
                 .limit(k)

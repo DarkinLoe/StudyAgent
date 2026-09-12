@@ -14,6 +14,7 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
 import studio.lingrui.studyagent.infrastructure.security.JwtAuthFilter;
+import studio.lingrui.studyagent.infrastructure.web.RateLimitFilter;
 import studio.lingrui.studyagent.shared.api.ApiResponse;
 import studio.lingrui.studyagent.shared.exception.ErrorCode;
 
@@ -33,6 +34,7 @@ import java.io.IOException;
 public class SecurityConfig {
 
     private final JwtAuthFilter jwtAuthFilter;
+    private final RateLimitFilter rateLimitFilter;
     private final ObjectMapper objectMapper;
 
     @Bean
@@ -58,6 +60,8 @@ public class SecurityConfig {
                         .accessDeniedHandler((request, response, ex) ->
                                 writeJson(response, HttpServletResponse.SC_FORBIDDEN, ErrorCode.FORBIDDEN)))
                 .addFilterBefore(jwtAuthFilter, UsernamePasswordAuthenticationFilter.class)
+                // 限流放在 JWT 之后：能按用户维度计数
+                .addFilterAfter(rateLimitFilter, JwtAuthFilter.class)
                 .formLogin(AbstractHttpConfigurer::disable)
                 .httpBasic(AbstractHttpConfigurer::disable);
         return http.build();

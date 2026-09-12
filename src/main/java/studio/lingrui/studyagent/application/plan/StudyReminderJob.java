@@ -9,7 +9,10 @@ import studio.lingrui.studyagent.domain.plan.PlanTaskRepository;
 import studio.lingrui.studyagent.domain.plan.StudyPlan;
 import studio.lingrui.studyagent.domain.plan.StudyPlanRepository;
 import studio.lingrui.studyagent.domain.plan.StudyReminder;
+import studio.lingrui.studyagent.infrastructure.cache.RedisCacheHelper;
+import studio.lingrui.studyagent.infrastructure.config.properties.StudyAgentProperties;
 
+import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
@@ -28,9 +31,31 @@ public class StudyReminderJob {
     private final PlanTaskRepository tasks;
     private final StudyPlanRepository plans;
     private final ReminderApplicationService reminders;
+    private final RedisCacheHelper cache;
+    private final StudyAgentProperties props;
 
+    /**
+     * 定时入口：多实例部署时用 Redis 分布式锁串行化，避免重复生成/推送提醒。
+     * 锁 TTL 5 分钟（远大于单轮执行时间），执行完显式释放；Redis 不可用时放行（宁可重跑也不漏跑）。
+     */
     @Scheduled(cron = "${study-agent.reminder.poll-cron}")
     public void remindDueTasks() {
+        boolean useLock = props.getSecurity().isDistributedJobLock();
+        String lockKey = "lock:job:study-reminder";
+        if (useLock && !cache.tryLock(lockKey, Duration.ofMinutes(5))) {
+            log.info("其他实例正在执行学习提醒任务，跳过本轮");
+            return;
+        }
+        try {
+            doRemindDueTasks();
+        } finally {
+            if (useLock) {
+                cache.unlock(lockKey);
+            }
+        }
+    }
+
+    private void doRemindDueTasks() {
         LocalDateTime now = LocalDateTime.now();
         List<PlanTask> due = tasks.findByDoneFalseAndReminderSentFalseAndPlannedDateLessThanEqual(now.toLocalDate());
         if (due.isEmpty()) {
