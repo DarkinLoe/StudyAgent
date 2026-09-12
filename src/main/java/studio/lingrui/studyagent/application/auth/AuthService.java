@@ -1,14 +1,19 @@
 package studio.lingrui.studyagent.application.auth;
 
+import com.fasterxml.jackson.core.type.TypeReference;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import studio.lingrui.studyagent.domain.auth.User;
 import studio.lingrui.studyagent.domain.auth.UserRepository;
+import studio.lingrui.studyagent.infrastructure.cache.RedisCacheHelper;
 import studio.lingrui.studyagent.infrastructure.security.JwtService;
 import studio.lingrui.studyagent.shared.exception.BizException;
 import studio.lingrui.studyagent.shared.exception.ErrorCode;
+
+import java.time.Duration;
+import java.util.Optional;
 
 /**
  * 认证用例：注册 / 登录 / 查询当前用户。
@@ -31,6 +36,7 @@ public class AuthService {
     private final UserRepository users;
     private final PasswordEncoder passwordEncoder;
     private final JwtService jwtService;
+    private final RedisCacheHelper cache;
 
     @Transactional
     public AuthResult register(String username, String rawPassword, String nickname) {
@@ -56,7 +62,7 @@ public class AuthService {
     @Transactional(readOnly = true)
     public AuthResult login(String username, String rawPassword) {
         String name = username == null ? "" : username.trim();
-        User user = users.findByUsername(name)
+        User user = findCachedByUsername(name)
                 .orElseThrow(() -> new BizException(ErrorCode.UNAUTHORIZED, "用户名或密码错误"));
         if (!Boolean.TRUE.equals(user.getEnabled())) {
             throw new BizException(ErrorCode.FORBIDDEN, "账号已被禁用");
@@ -69,8 +75,29 @@ public class AuthService {
 
     @Transactional(readOnly = true)
     public User require(Long userId) {
-        return users.findById(userId)
+        String key = "cache:user:id:" + userId;
+        User cached = cache.get(key, new TypeReference<>() {
+        });
+        if (cached != null) {
+            return cached;
+        }
+        User user = users.findById(userId)
                 .orElseThrow(() -> new BizException(ErrorCode.UNAUTHORIZED, "用户不存在"));
+        cache.set(key, user, Duration.ofMinutes(10));
+        return user;
+    }
+
+    /** 按用户名查用户（走 Redis 缓存，降低登录/鉴权热路径的 DB 压力） */
+    private Optional<User> findCachedByUsername(String username) {
+        String key = "cache:user:name:" + username;
+        User cached = cache.get(key, new TypeReference<>() {
+        });
+        if (cached != null) {
+            return Optional.of(cached);
+        }
+        Optional<User> found = users.findByUsername(username);
+        found.ifPresent(user -> cache.set(key, user, Duration.ofMinutes(10)));
+        return found;
     }
 
     private AuthResult toResult(User user) {
