@@ -154,6 +154,8 @@ study-agent:
   file:
     upload-dir: ${UPLOAD_DIR:./data/uploads}
     allowed-extensions: ppt,pptx,doc,docx,pdf,txt,md,xlsx,xls,csv
+    # 单个文件大小上限（MB）：与 spring.servlet.multipart.max-file-size 保持一致并再兜一层
+    max-file-size-mb: 50
   rag:
     chunk-size: 800
     chunk-overlap: 100

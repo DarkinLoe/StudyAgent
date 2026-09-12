@@ -58,6 +58,11 @@ public class StudyAgentProperties {
         /** 允许上传的扩展名（小写，不含点） */
         private List<String> allowedExtensions = List.of(
                 "ppt", "pptx", "doc", "docx", "pdf", "txt", "md", "xlsx", "xls", "csv");
+        /**
+         * 单个文件大小上限（MB）。Servlet 的 spring.servlet.multipart.max-file-size 是第一道闸，
+         * 这里再兜一层：MQ 异步摄入、后续新增的上传入口同样受保护。
+         */
+        private int maxFileSizeMb = 50;
     }
 
     @Data

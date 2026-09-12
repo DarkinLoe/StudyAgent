@@ -56,6 +56,11 @@ public class RagDocumentService {
         if (file == null || file.isEmpty()) {
             throw new BizException(ErrorCode.BAD_REQUEST, "上传文件为空");
         }
+        long maxBytes = (long) props.getFile().getMaxFileSizeMb() * 1024 * 1024;
+        if (file.getSize() > maxBytes) {
+            throw new BizException(ErrorCode.BAD_REQUEST,
+                    "文件超过大小上限 " + props.getFile().getMaxFileSizeMb() + "MB");
+        }
         String name = file.getOriginalFilename() == null ? "unnamed" : file.getOriginalFilename();
         String ext = extOf(name);
         if (ext.isEmpty() || !props.getFile().getAllowedExtensions().contains(ext)) {
