@@ -89,6 +89,7 @@ export const api = {
     register: (username, password, nickname) =>
         request('/api/auth/register', { method: 'POST', body: { username, password, nickname } }),
     me: () => request('/api/auth/me'),
+    logout: () => request('/api/auth/logout', { method: 'POST' }),
 
     // 健康检查（公开接口）
     health: () => request('/actuator/health'),

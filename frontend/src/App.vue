@@ -23,7 +23,14 @@ function toast(message, isError = false) {
 }
 provide('toast', toast)
 
-function logout() {
+async function logout() {
+    try {
+        // 先让服务端吊销令牌：无状态 JWT 自己不会失效，只清本地存储的话，
+        // 被拿走的 token 依然能一直用到过期
+        await api.logout()
+    } catch (e) {
+        // 服务端不可达也要保证本地退出，不阻塞用户
+    }
     clearSession()
     toast('已退出登录')
     router.push('/login')

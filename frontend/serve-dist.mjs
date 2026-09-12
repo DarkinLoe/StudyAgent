@@ -5,7 +5,7 @@
  * 行为刻意对齐 frontend/nginx.conf，方便本地验证生产形态：
  *   1. 托管 frontend/dist 静态资源
  *   2. SPA history 路由回退到 index.html
- *   3. /api、/actuator 反向代理到后端（默认 http://localhost:8080），透传 X-User-Id
+ *   3. /api、/actuator 反向代理到后端（默认 http://localhost:8080），透传 Authorization
  *
  * 用法：
  *   npm run build
