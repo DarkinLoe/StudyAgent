@@ -1,0 +1,15 @@
+# MySQL 客户端/服务端字符集统一为 utf8mb4
+#
+# 背景：MySQL 8 服务端即使建库为 utf8mb4，命令行客户端（mysql 命令）默认仍可能是 latin1，
+# 导致 `docker compose exec mysql mysql -e "SELECT ..."` 输出的中文变成乱码。
+# 这个配置文件同时作用于服务端与客户端（挂载到 /etc/mysql/conf.d/ 会被自动加载）。
+
+[client]
+default-character-set = utf8mb4
+
+[mysql]
+default-character-set = utf8mb4
+
+[mysqld]
+character-set-server = utf8mb4
+collation-server = utf8mb4_unicode_ci

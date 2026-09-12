@@ -14,7 +14,12 @@ FROM eclipse-temurin:21-jre
 WORKDIR /app
 COPY --from=build /workspace/target/*.jar app.jar
 
-ENV SERVER_PORT=8080 \
+# 编码设置很关键：容器默认 locale 常为 POSIX/ASCII，
+# 会导致 JVM 输出（日志）里的中文变成 "?"，也影响读写的字符集
+ENV LANG=C.UTF-8 \
+    LC_ALL=C.UTF-8 \
+    JAVA_TOOL_OPTIONS="-Dfile.encoding=UTF-8 -Dsun.stdout.encoding=UTF-8 -Dsun.stderr.encoding=UTF-8" \
+    SERVER_PORT=8080 \
     UPLOAD_DIR=/app/data/uploads \
     JAVA_OPTS=""
 

@@ -16,6 +16,9 @@
 
     <properties>
         <java.version>21</java.version>
+        <!-- 源码/资源统一 UTF-8，避免中文注释与文案在编译期被按平台默认编码处理 -->
+        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+        <project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
         <spring-ai.version>2.0.1</spring-ai.version>
         <tika.version>2.9.2</tika.version>
         <jjwt.version>0.12.6</jjwt.version>
