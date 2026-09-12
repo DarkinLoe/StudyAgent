@@ -28,8 +28,7 @@ public class StudyNote extends BaseEntity {
     @Column(nullable = false, length = 300)
     private String title;
 
-    @Lob
-    @Column(nullable = false)
+    @Column(nullable = false, columnDefinition = "LONGTEXT")
     private String content;
 
     @Enumerated(EnumType.STRING)

@@ -35,8 +35,8 @@ public class ChatMessage extends BaseEntity {
     @Column(nullable = false, length = 20)
     private MessageRole role;
 
-    @Lob
-    @Column(nullable = false)
+    /** 消息正文；必须显式指定 LONGTEXT —— Hibernate 7 + MySQL 下 @Lob 会映射成 tinytext(255B) */
+    @Column(nullable = false, columnDefinition = "LONGTEXT")
     private String content;
 
     /** RAG 引用来源（JSON 数组：[{docId,docName,score,snippet}]），可为空 */

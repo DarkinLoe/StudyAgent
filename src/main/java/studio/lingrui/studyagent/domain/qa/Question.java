@@ -36,8 +36,8 @@ public class Question extends BaseEntity {
     @Column(nullable = false, length = 30)
     private QuestionType type;
 
-    @Lob
-    @Column(nullable = false)
+    /** 题干；显式 LONGTEXT（@Lob 在 Hibernate 7 + MySQL 上会变成 tinytext） */
+    @Column(nullable = false, columnDefinition = "LONGTEXT")
     private String stem;
 
     /** 选项（JSON 字符串数组，顺序即 A/B/C...）；判断题可为空 */
@@ -45,12 +45,10 @@ public class Question extends BaseEntity {
     private String optionsJson;
 
     /** 答案：单选 "A"；多选 "A,B"；判断 "对"/"错"；填空/简答为参考答案文本 */
-    @Lob
-    @Column(nullable = false)
+    @Column(nullable = false, columnDefinition = "LONGTEXT")
     private String answer;
 
-    @Lob
-    @Column
+    @Column(columnDefinition = "LONGTEXT")
     private String explanation;
 
     /** 难度 1~5 */

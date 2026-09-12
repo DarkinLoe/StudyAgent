@@ -57,9 +57,8 @@ public class KnowledgeDocument extends BaseEntity {
     @Column(name = "error_msg", columnDefinition = "TEXT")
     private String errorMsg;
 
-    /** 解析出的纯文本（课程表/PPT/文档内容），用于检索与重建索引 */
-    @Lob
-    @Column(name = "text_content")
+    /** 解析出的纯文本（课程表/PPT/文档内容），用于检索与重建索引；显式 LONGTEXT 以容纳长文档 */
+    @Column(name = "text_content", columnDefinition = "LONGTEXT")
     private String textContent;
 
     /** 该文档切分出的块数 */

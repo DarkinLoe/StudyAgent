@@ -37,8 +37,7 @@ public class StudyReminder extends BaseEntity {
     @Column(nullable = false, length = 200)
     private String title;
 
-    @Lob
-    @Column(nullable = false)
+    @Column(nullable = false, columnDefinition = "LONGTEXT")
     private String message;
 
     @Column(name = "remind_at", nullable = false)

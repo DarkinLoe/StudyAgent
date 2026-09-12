@@ -220,8 +220,17 @@ CI：`.github/workflows/ci.yml` 在 push/PR 时执行 `./mvnw test` + `package`�
    不匹配，被 Spring Data 当作派生查询解析而启动失败——已删除冗余声明。
 3. **Spring Data Redis 仓储扫描**：`spring.data.redis.repositories.enabled=false`，避免启动刷
    "Could not safely identify store assignment" 日志。
+4. **Hibernate 7 + MySQL：`@Lob` 的 `String` 会建表成 `tinytext`（仅 255 字节）**：会话消息、题干、
+   笔记、文档正文一旦超过 255 字节即报
+   `Data truncation: Data too long for column 'content'`（中文约 85 字就触发）。
+   修复：实体显式声明 `columnDefinition = "LONGTEXT"`；**已有库**还需执行
+   `docker/mysql/fix-text-columns.sql`——因为 `ddl-auto=update` 只加表/列，**不会修改已存在列的类型**。
+5. **Spring AI 2.0 的模型解析**：聊天模型通过环境变量/外部配置仍可能不生效（回落到库内置默认模型，
+   报 `404: The model \`gpt-5-mini\` does not exist`）。修复：`OpenAiChatAdapter` 构建请求时
+   **显式写入模型名**（依次解析 `chat.model → chat.options.model → openai.model → AI_CHAT_MODEL`）。
 
-> 教训：Agent/后端类项目必须**至少真实启动一次**，编译通过与单测全绿都替代不了它。
+> 教训：Agent/后端类项目必须**至少真实启动一次**，编译通过与单测全绿都替代不了它；
+> 而且"配置不生效"这类问题，往往要靠**把真实生效值打出来**（列类型、容器环境变量、实际请求参数）才能定位。
 
 ## 八、说明与取舍
 
