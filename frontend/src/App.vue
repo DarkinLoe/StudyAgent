@@ -1,13 +1,18 @@
 <script setup>
-import { onMounted, provide, ref } from 'vue'
-import { RouterLink, RouterView } from 'vue-router'
-import { api, getUserId, setUserId } from './api'
+import { computed, onMounted, provide, ref } from 'vue'
+import { RouterLink, RouterView, useRoute, useRouter } from 'vue-router'
+import { api, clearSession, currentUser } from './api'
 
-const userIdInput = ref(getUserId())
+const route = useRoute()
+const router = useRouter()
+
 const healthState = ref('unknown') // up | warn | down
 const toastMessage = ref('')
 const toastError = ref(false)
 let toastTimer = null
+
+const isLoginPage = computed(() => route.path === '/login')
+const user = computed(() => currentUser())
 
 /** 简易全局提示：子组件通过 inject('toast') 使用 */
 function toast(message, isError = false) {
@@ -18,10 +23,10 @@ function toast(message, isError = false) {
 }
 provide('toast', toast)
 
-function applyUserId() {
-    setUserId(userIdInput.value)
-    toast(`已切换为用户 ${getUserId()}`)
-    checkHealth()
+function logout() {
+    clearSession()
+    toast('已退出登录')
+    router.push('/login')
 }
 
 async function checkHealth() {
@@ -39,19 +44,18 @@ onMounted(checkHealth)
 <template>
     <header class="topbar">
         <div class="brand">StudyAgent <span class="sub">个人学习 Agent 控制台（Vue 3 + Vite）</span></div>
-        <div class="controls">
-            <label class="inline">用户
-                <input v-model="userIdInput" type="number" min="1" @change="applyUserId"/>
-            </label>
+        <div v-if="!isLoginPage" class="controls">
+            <span class="inline" v-if="user">👤 {{ user.nickname || user.username }}</span>
             <span class="badge"
                   :class="{ 'badge-ok': healthState === 'up', 'badge-off': healthState === 'down', 'badge-warn': healthState === 'warn' }">
                 {{ healthState === 'up' ? '已连接' : healthState === 'down' ? '未连接' : '检测中' }}
             </span>
             <button class="ghost" type="button" @click="checkHealth">重新检测</button>
+            <button class="ghost" type="button" @click="logout">退出登录</button>
         </div>
     </header>
 
-    <nav class="tabs">
+    <nav class="tabs" v-if="!isLoginPage">
         <RouterLink class="tab" active-class="active" to="/chat">对话</RouterLink>
         <RouterLink class="tab" active-class="active" to="/rag">知识库</RouterLink>
         <RouterLink class="tab" active-class="active" to="/qa">题库 / 错题</RouterLink>

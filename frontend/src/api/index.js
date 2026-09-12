@@ -3,22 +3,53 @@
  *
  * 约定：
  * - 统一响应 {code, message, data}：code!==0 视为业务失败并抛错
- * - 用户标识通过 X-User-Id 头传递（登录体系上线后改为 JWT）
+ * - 认证：登录后把 JWT 存 localStorage，后续请求带 `Authorization: Bearer <token>`
+ * - 401 统一处理：清除本地会话并跳转登录页；429 提示限流
  * - 路径一律使用相对路径，开发由 Vite 代理、生产由 Nginx 反向代理
  */
 
-const USER_KEY = 'studyAgent.userId'
+const TOKEN_KEY = 'studyAgent.token'
+const USER_KEY = 'studyAgent.user'
 
-export function getUserId() {
-    return localStorage.getItem(USER_KEY) || '1'
+export function getToken() {
+    return localStorage.getItem(TOKEN_KEY)
 }
 
-export function setUserId(id) {
-    localStorage.setItem(USER_KEY, String(id || '1'))
+export function setSession(auth) {
+    localStorage.setItem(TOKEN_KEY, auth.token)
+    localStorage.setItem(USER_KEY, JSON.stringify({
+        userId: auth.userId,
+        username: auth.username,
+        nickname: auth.nickname
+    }))
+}
+
+export function clearSession() {
+    localStorage.removeItem(TOKEN_KEY)
+    localStorage.removeItem(USER_KEY)
+}
+
+export function currentUser() {
+    try {
+        return JSON.parse(localStorage.getItem(USER_KEY))
+    } catch (e) {
+        return null
+    }
+}
+
+function toLogin() {
+    clearSession()
+    if (!window.location.pathname.startsWith('/login')) {
+        window.location.href = '/login'
+    }
 }
 
 async function request(path, options = {}) {
-    const headers = { 'X-User-Id': getUserId() }
+    const headers = {}
+    const token = getToken()
+    if (token) {
+        headers['Authorization'] = 'Bearer ' + token
+    }
     let body
     if (options.form) {
         body = options.form // FormData：交给浏览器设置 Content-Type
@@ -28,6 +59,15 @@ async function request(path, options = {}) {
     }
 
     const res = await fetch(path, { method: options.method || 'GET', headers, body })
+
+    if (res.status === 401) {
+        toLogin()
+        throw new Error('登录已过期，请重新登录')
+    }
+    if (res.status === 429) {
+        throw new Error('请求过于频繁，请稍后再试')
+    }
+
     let json = null
     try {
         json = await res.json()
@@ -44,7 +84,13 @@ async function request(path, options = {}) {
 }
 
 export const api = {
-    // 健康检查（非统一响应体，直接返回 {status: 'UP'}）
+    // ---------- 认证 ----------
+    login: (username, password) => request('/api/auth/login', { method: 'POST', body: { username, password } }),
+    register: (username, password, nickname) =>
+        request('/api/auth/register', { method: 'POST', body: { username, password, nickname } }),
+    me: () => request('/api/auth/me'),
+
+    // 健康检查（公开接口）
     health: () => request('/actuator/health'),
 
     // ---------- Agent 对话 ----------

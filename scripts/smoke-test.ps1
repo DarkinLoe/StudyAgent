@@ -1,12 +1,32 @@
 param(
     [string]$BaseUrl = 'http://localhost:8080',
-    [long]$UserId = 1
+    [string]$Username = 'smoke',
+    [string]$Password = 'smoke123456'
 )
 
 # StudyAgent 一键冒烟测试：验证核心链路（不含需要真实 AI Key 的对话接口）
 # 用法：先启动应用，然后执行  .\scripts\smoke-test.ps1
+# 认证：先用测试账号登录（不存在则自动注册），后续请求携带 Bearer token
 
-$headers = @{ 'X-User-Id' = "$UserId" }
+function Invoke-AuthApi($path, $payload) {
+    $bytes = [System.Text.Encoding]::UTF8.GetBytes(($payload | ConvertTo-Json))
+    return Invoke-RestMethod -Uri "$BaseUrl$path" -Method Post `
+        -ContentType 'application/json; charset=utf-8' -Body $bytes -TimeoutSec 30
+}
+
+$auth = $null
+try {
+    $auth = Invoke-AuthApi '/api/auth/login' @{ username = $Username; password = $Password }
+} catch {
+    $auth = Invoke-AuthApi '/api/auth/register' @{ username = $Username; password = $Password; nickname = '冒烟测试' }
+}
+if (-not $auth -or -not $auth.data.token) {
+    Write-Host '登录/注册失败，冒烟测试终止' -ForegroundColor Red
+    exit 1
+}
+Write-Host "已登录：$($auth.data.username)（user #$($auth.data.userId)）" -ForegroundColor Green
+
+$headers = @{ 'Authorization' = "Bearer $($auth.data.token)" }
 $script:failures = 0
 
 function Section($title) {
