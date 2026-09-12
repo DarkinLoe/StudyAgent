@@ -8,8 +8,8 @@ import studio.lingrui.studyagent.application.port.VectorIndexPort;
 import studio.lingrui.studyagent.domain.rag.IndexStatus;
 import studio.lingrui.studyagent.domain.rag.KnowledgeDocument;
 import studio.lingrui.studyagent.domain.rag.KnowledgeDocumentRepository;
-import studio.lingrui.studyagent.infrastructure.config.properties.StudyAgentProperties;
-import studio.lingrui.studyagent.infrastructure.rag.TextExtractionService;
+import studio.lingrui.studyagent.shared.config.StudyAgentProperties;
+import studio.lingrui.studyagent.application.port.TextExtractionPort;
 import studio.lingrui.studyagent.shared.exception.BizException;
 import studio.lingrui.studyagent.shared.exception.ErrorCode;
 
@@ -28,7 +28,7 @@ public class RagIngestService {
 
     private final KnowledgeDocumentRepository documents;
     private final FileStorePort fileStore;
-    private final TextExtractionService textExtraction;
+    private final TextExtractionPort textExtraction;
     private final VectorIndexPort vectorIndex;
     private final StudyAgentProperties props;
 

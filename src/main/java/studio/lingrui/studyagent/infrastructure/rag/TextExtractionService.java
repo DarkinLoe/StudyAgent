@@ -6,19 +6,22 @@ import org.apache.tika.metadata.Metadata;
 import org.apache.tika.parser.AutoDetectParser;
 import org.apache.tika.sax.BodyContentHandler;
 import org.springframework.stereotype.Service;
+import studio.lingrui.studyagent.application.port.TextExtractionPort;
 import studio.lingrui.studyagent.shared.exception.BizException;
 import studio.lingrui.studyagent.shared.exception.ErrorCode;
 
 import java.io.InputStream;
 
 /**
- * 文档文本抽取：基于 Apache Tika，支持 PDF/PPT/PPTX/Word/Excel/TXT/Markdown 等。
+ * 文档文本抽取适配器：基于 Apache Tika 实现 {@link TextExtractionPort}，
+ * 支持 PDF/PPT/PPTX/Word/Excel/TXT/Markdown 等。
  */
 @Slf4j
 @Service
 @RequiredArgsConstructor
-public class TextExtractionService {
+public class TextExtractionService implements TextExtractionPort {
 
+    @Override
     public String extract(InputStream in) {
         try {
             AutoDetectParser parser = new AutoDetectParser();

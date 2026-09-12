@@ -1,4 +1,4 @@
-package studio.lingrui.studyagent.infrastructure.config.properties;
+package studio.lingrui.studyagent.shared.config;
 
 import lombok.Data;
 import org.springframework.boot.context.properties.ConfigurationProperties;

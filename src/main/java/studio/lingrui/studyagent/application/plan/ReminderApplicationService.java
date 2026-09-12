@@ -8,9 +8,9 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import studio.lingrui.studyagent.domain.plan.StudyReminder;
 import studio.lingrui.studyagent.domain.plan.StudyReminderRepository;
-import studio.lingrui.studyagent.infrastructure.cache.RedisCacheHelper;
-import studio.lingrui.studyagent.infrastructure.config.properties.StudyAgentProperties;
-import studio.lingrui.studyagent.infrastructure.mq.MqGateway;
+import studio.lingrui.studyagent.application.port.CachePort;
+import studio.lingrui.studyagent.shared.config.StudyAgentProperties;
+import studio.lingrui.studyagent.application.port.MqPort;
 import studio.lingrui.studyagent.shared.exception.BizException;
 import studio.lingrui.studyagent.shared.exception.ErrorCode;
 
@@ -27,8 +27,8 @@ public class ReminderApplicationService {
 
     private final StudyReminderRepository reminders;
     private final StudyAgentProperties props;
-    private final ObjectProvider<MqGateway> mqGatewayProvider;
-    private final RedisCacheHelper cache;
+    private final ObjectProvider<MqPort> mqGatewayProvider;
+    private final CachePort cache;
 
     public Page<StudyReminder> list(Long userId, int page, int size) {
         return reminders.findByUserIdOrderByIdDesc(userId, PageRequest.of(page - 1, size));
@@ -40,13 +40,12 @@ public class ReminderApplicationService {
 
     public long unreadCount(Long userId) {
         String cacheKey = UNREAD_PREFIX + userId;
-        Long cached = cache.get(cacheKey, new com.fasterxml.jackson.core.type.TypeReference<>() {
-        });
+        Long cached = cache.get(cacheKey, Long.class).orElse(null);
         if (cached != null) {
             return cached;
         }
         long count = reminders.countByUserIdAndReadFlagFalse(userId);
-        cache.set(cacheKey, count, props.getCache().getDefaultTtl());
+        cache.put(cacheKey, count, props.getCache().getDefaultTtl());
         return count;
     }
 
@@ -74,7 +73,7 @@ public class ReminderApplicationService {
     public void pushReminder(StudyReminder reminder) {
         StudyReminder saved = reminders.save(reminder);
         evictUnread(saved.getUserId());
-        MqGateway mq = mqGatewayProvider.getIfAvailable();
+        MqPort mq = mqGatewayProvider.getIfAvailable();
         if (props.getMq().isEnabled() && mq != null) {
             mq.publishReminderPush(saved.getUserId(), saved.getId(),
                     saved.getTitle(), saved.getMessage());
@@ -83,7 +82,7 @@ public class ReminderApplicationService {
 
     private void evictUnread(Long userId) {
         if (userId != null) {
-            cache.delete(UNREAD_PREFIX + userId);
+            cache.evict(UNREAD_PREFIX + userId);
         }
     }
 }

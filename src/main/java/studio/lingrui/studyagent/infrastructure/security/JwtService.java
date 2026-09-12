@@ -5,7 +5,7 @@ import io.jsonwebtoken.Jwts;
 import io.jsonwebtoken.security.Keys;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
-import studio.lingrui.studyagent.infrastructure.config.properties.StudyAgentProperties;
+import studio.lingrui.studyagent.shared.config.StudyAgentProperties;
 
 import javax.crypto.SecretKey;
 import java.nio.charset.StandardCharsets;

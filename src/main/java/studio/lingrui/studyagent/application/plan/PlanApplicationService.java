@@ -1,6 +1,5 @@
 package studio.lingrui.studyagent.application.plan;
 
-import com.fasterxml.jackson.core.type.TypeReference;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
@@ -11,7 +10,7 @@ import studio.lingrui.studyagent.domain.plan.PlanTaskRepository;
 import studio.lingrui.studyagent.domain.plan.StudyPlan;
 import studio.lingrui.studyagent.domain.plan.StudyPlanRepository;
 import studio.lingrui.studyagent.domain.plan.StudyPlanStatus;
-import studio.lingrui.studyagent.infrastructure.cache.RedisCacheHelper;
+import studio.lingrui.studyagent.application.port.CachePort;
 import studio.lingrui.studyagent.shared.exception.BizException;
 import studio.lingrui.studyagent.shared.exception.ErrorCode;
 
@@ -37,7 +36,7 @@ public class PlanApplicationService {
 
     private final StudyPlanRepository plans;
     private final PlanTaskRepository tasks;
-    private final RedisCacheHelper cache;
+    private final CachePort cache;
 
     // ---------------- 计划 ----------------
 
@@ -156,8 +155,7 @@ public class PlanApplicationService {
     @Transactional(readOnly = true)
     public List<TodayTask> todayTasks(Long userId) {
         String cacheKey = TODAY_CACHE_PREFIX + userId;
-        List<TodayTask> cached = cache.get(cacheKey, new TypeReference<>() {
-        });
+        List<TodayTask> cached = cache.getList(cacheKey, TodayTask.class).orElse(null);
         if (cached != null) {
             return cached;
         }
@@ -192,7 +190,7 @@ public class PlanApplicationService {
             }
         }
         result.sort(Comparator.comparing(TodayTask::plannedStart));
-        cache.set(cacheKey, result, Duration.ofSeconds(30));
+        cache.put(cacheKey, result, Duration.ofSeconds(30));
         return result;
     }
 
@@ -215,7 +213,7 @@ public class PlanApplicationService {
     }
 
     private void evictTodayCache() {
-        cache.deleteByPrefix(TODAY_CACHE_PREFIX);
+        cache.evictByPrefix(TODAY_CACHE_PREFIX);
     }
 
     private boolean isBlank(String s) {

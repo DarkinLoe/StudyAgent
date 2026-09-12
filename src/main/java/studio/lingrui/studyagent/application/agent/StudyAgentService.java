@@ -23,7 +23,7 @@ import studio.lingrui.studyagent.domain.chat.ChatSession;
 import studio.lingrui.studyagent.domain.chat.ChatSessionRepository;
 import studio.lingrui.studyagent.domain.chat.MessageRole;
 import studio.lingrui.studyagent.domain.rag.RetrievedChunk;
-import studio.lingrui.studyagent.infrastructure.config.properties.StudyAgentProperties;
+import studio.lingrui.studyagent.shared.config.StudyAgentProperties;
 import studio.lingrui.studyagent.shared.exception.BizException;
 import studio.lingrui.studyagent.shared.exception.ErrorCode;
 

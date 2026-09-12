@@ -6,12 +6,13 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.amqp.rabbit.core.RabbitTemplate;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Service;
-import studio.lingrui.studyagent.infrastructure.config.properties.StudyAgentProperties;
+import studio.lingrui.studyagent.application.port.MqPort;
+import studio.lingrui.studyagent.shared.config.StudyAgentProperties;
 import studio.lingrui.studyagent.infrastructure.mq.message.DocumentIngestMessage;
 import studio.lingrui.studyagent.infrastructure.mq.message.ReminderPushMessage;
 
 /**
- * RabbitMQ 发布门面（study-agent.mq.enabled=true 时启用）：
+ * RabbitMQ 发布适配器：实现应用层的 {@link MqPort}（study-agent.mq.enabled=true 时启用）。
  * <ul>
  *   <li>文档摄入任务 → ingest 队列（消息体见 {@link DocumentIngestMessage}）</li>
  *   <li>学习提醒 → reminder 队列（消息体见 {@link ReminderPushMessage}）</li>
@@ -24,7 +25,7 @@ import studio.lingrui.studyagent.infrastructure.mq.message.ReminderPushMessage;
 @Service
 @RequiredArgsConstructor
 @ConditionalOnProperty(prefix = "study-agent.mq", name = "enabled", havingValue = "true")
-public class MqGateway {
+public class MqGateway implements MqPort {
 
     private final RabbitTemplate rabbitTemplate;
     private final StudyAgentProperties props;

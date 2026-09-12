@@ -9,8 +9,8 @@ import studio.lingrui.studyagent.domain.plan.PlanTaskRepository;
 import studio.lingrui.studyagent.domain.plan.StudyPlan;
 import studio.lingrui.studyagent.domain.plan.StudyPlanRepository;
 import studio.lingrui.studyagent.domain.plan.StudyReminder;
-import studio.lingrui.studyagent.infrastructure.cache.RedisCacheHelper;
-import studio.lingrui.studyagent.infrastructure.config.properties.StudyAgentProperties;
+import studio.lingrui.studyagent.application.port.CachePort;
+import studio.lingrui.studyagent.shared.config.StudyAgentProperties;
 
 import java.time.Duration;
 import java.time.LocalDateTime;
@@ -31,7 +31,7 @@ public class StudyReminderJob {
     private final PlanTaskRepository tasks;
     private final StudyPlanRepository plans;
     private final ReminderApplicationService reminders;
-    private final RedisCacheHelper cache;
+    private final CachePort cache;
     private final StudyAgentProperties props;
 
     /**
@@ -42,16 +42,19 @@ public class StudyReminderJob {
     public void remindDueTasks() {
         boolean useLock = props.getSecurity().isDistributedJobLock();
         String lockKey = "lock:job:study-reminder";
-        if (useLock && !cache.tryLock(lockKey, Duration.ofMinutes(5))) {
+        // 锁句柄携带持有者 token：释放时做归属校验，避免"上一个实例的锁已超时被他人重新获取、
+        // 却又被前一个实例删掉"
+        CachePort.Lock lock = useLock
+                ? cache.tryLock(lockKey, Duration.ofMinutes(5)).orElse(null)
+                : null;
+        if (useLock && lock == null) {
             log.info("其他实例正在执行学习提醒任务，跳过本轮");
             return;
         }
         try {
             doRemindDueTasks();
         } finally {
-            if (useLock) {
-                cache.unlock(lockKey);
-            }
+            cache.release(lock);
         }
     }
 
@@ -83,11 +86,15 @@ public class StudyReminderJob {
                         + "【" + task.getSubject() + "】" + task.getContent()
                         + "\n计划时段 " + task.getPlannedDate() + " " + task.getPlannedStart()
                         + "，预计 " + task.getPlannedMinutes() + " 分钟。";
-                StudyReminder reminder = StudyReminder.create(
-                        plan.getUserId(), plan.getId(), task.getId(), title, message);
-                reminders.pushReminder(reminder);
+                // 先落"已提醒"标记，再推送：多实例并发处理同一任务时，PlanTask 的 @Version
+                // 乐观锁会让后提交者失败，于是只有一方能推送成功，不会发两条重复提醒
+                // （标记成功后进程崩溃只会漏一条，不会重复发，取舍见 README 的已知边界）
                 task.markReminderSent();
                 tasks.save(task);
+                reminders.pushReminder(StudyReminder.create(
+                        plan.getUserId(), plan.getId(), task.getId(), title, message));
+            } catch (org.springframework.dao.OptimisticLockingFailureException e) {
+                log.info("该任务已被其他实例提醒过，跳过 taskId={}", task.getId());
             } catch (Exception e) {
                 log.error("学习提醒生成失败 taskId={}", task.getId(), e);
             }

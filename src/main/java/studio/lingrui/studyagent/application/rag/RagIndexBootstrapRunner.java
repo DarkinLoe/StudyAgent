@@ -8,7 +8,7 @@ import org.springframework.stereotype.Component;
 import studio.lingrui.studyagent.domain.rag.IndexStatus;
 import studio.lingrui.studyagent.domain.rag.KnowledgeDocument;
 import studio.lingrui.studyagent.domain.rag.KnowledgeDocumentRepository;
-import studio.lingrui.studyagent.infrastructure.config.properties.StudyAgentProperties;
+import studio.lingrui.studyagent.shared.config.StudyAgentProperties;
 
 import java.util.List;
 

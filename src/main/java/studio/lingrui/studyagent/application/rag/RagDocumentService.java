@@ -13,8 +13,8 @@ import studio.lingrui.studyagent.application.port.VectorIndexPort;
 import studio.lingrui.studyagent.domain.rag.DocumentSourceType;
 import studio.lingrui.studyagent.domain.rag.KnowledgeDocument;
 import studio.lingrui.studyagent.domain.rag.KnowledgeDocumentRepository;
-import studio.lingrui.studyagent.infrastructure.config.properties.StudyAgentProperties;
-import studio.lingrui.studyagent.infrastructure.mq.MqGateway;
+import studio.lingrui.studyagent.shared.config.StudyAgentProperties;
+import studio.lingrui.studyagent.application.port.MqPort;
 import studio.lingrui.studyagent.shared.exception.BizException;
 import studio.lingrui.studyagent.shared.exception.ErrorCode;
 
@@ -36,7 +36,7 @@ public class RagDocumentService {
     private final RagIngestService ingestService;
     private final KnowledgeKeywordSearchService keywordSearch;
     private final StudyAgentProperties props;
-    private final ObjectProvider<MqGateway> mqGatewayProvider;
+    private final ObjectProvider<MqPort> mqGatewayProvider;
 
     /**
      * 上传并启动摄入。
@@ -139,7 +139,7 @@ public class RagDocumentService {
      * 消息一旦先于事务提交发出，消费者就可能查不到这条文档。
      */
     private void dispatch(Long docId) {
-        MqGateway mq = mqGatewayProvider.getIfAvailable();
+        MqPort mq = mqGatewayProvider.getIfAvailable();
         if (props.getMq().isEnabled() && mq != null) {
             log.info("发布文档摄入任务 docId={} 到队列 {}", docId, props.getMq().getIngestQueue());
             mq.publishDocumentIngest(docId);

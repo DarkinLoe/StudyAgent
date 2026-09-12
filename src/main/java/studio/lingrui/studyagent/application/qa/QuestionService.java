@@ -11,7 +11,7 @@ import studio.lingrui.studyagent.domain.qa.QuestionType;
 import studio.lingrui.studyagent.domain.qa.ReviewStatus;
 import studio.lingrui.studyagent.domain.qa.WrongQuestion;
 import studio.lingrui.studyagent.domain.qa.WrongQuestionRepository;
-import studio.lingrui.studyagent.infrastructure.cache.RedisCacheHelper;
+import studio.lingrui.studyagent.application.port.CachePort;
 import studio.lingrui.studyagent.shared.exception.BizException;
 import studio.lingrui.studyagent.shared.exception.ErrorCode;
 
@@ -27,7 +27,7 @@ public class QuestionService {
 
     private final QuestionRepository questions;
     private final WrongQuestionRepository wrongs;
-    private final RedisCacheHelper cache;
+    private final CachePort cache;
 
     @Transactional
     public Question create(Long userId, Long bankId, QuestionType type, String stem,
@@ -101,7 +101,7 @@ public class QuestionService {
 
     void evictPending(Long userId) {
         if (userId != null) {
-            cache.delete(PENDING_CACHE_PREFIX + userId);
+            cache.evict(PENDING_CACHE_PREFIX + userId);
         }
     }
 

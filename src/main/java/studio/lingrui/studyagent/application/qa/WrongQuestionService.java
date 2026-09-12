@@ -10,7 +10,7 @@ import studio.lingrui.studyagent.domain.qa.QuestionRepository;
 import studio.lingrui.studyagent.domain.qa.ReviewStatus;
 import studio.lingrui.studyagent.domain.qa.WrongQuestion;
 import studio.lingrui.studyagent.domain.qa.WrongQuestionRepository;
-import studio.lingrui.studyagent.infrastructure.cache.RedisCacheHelper;
+import studio.lingrui.studyagent.application.port.CachePort;
 import studio.lingrui.studyagent.shared.api.PageResult;
 import studio.lingrui.studyagent.shared.exception.BizException;
 import studio.lingrui.studyagent.shared.exception.ErrorCode;
@@ -33,7 +33,7 @@ public class WrongQuestionService {
 
     private final WrongQuestionRepository wrongs;
     private final QuestionRepository questions;
-    private final RedisCacheHelper cache;
+    private final CachePort cache;
 
     public PageResult<WrongItem> list(Long userId, ReviewStatus status, int page, int size) {
         PageRequest pr = PageRequest.of(page - 1, size);
@@ -101,13 +101,12 @@ public class WrongQuestionService {
 
     public long pendingCount(Long userId) {
         String cacheKey = PENDING_CACHE_PREFIX + userId;
-        Long cached = cache.get(cacheKey, new com.fasterxml.jackson.core.type.TypeReference<>() {
-        });
+        Long cached = cache.get(cacheKey, Long.class).orElse(null);
         if (cached != null) {
             return cached;
         }
         long count = wrongs.countByUserIdAndReviewStatus(userId, ReviewStatus.PENDING);
-        cache.set(cacheKey, count, java.time.Duration.ofMinutes(10));
+        cache.put(cacheKey, count, java.time.Duration.ofMinutes(10));
         return count;
     }
 
@@ -118,7 +117,7 @@ public class WrongQuestionService {
 
     private void evictPending(Long userId) {
         if (userId != null) {
-            cache.delete(PENDING_CACHE_PREFIX + userId);
+            cache.evict(PENDING_CACHE_PREFIX + userId);
         }
     }
 
