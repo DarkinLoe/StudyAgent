@@ -14,8 +14,11 @@ import studio.lingrui.studyagent.domain.rag.RetrievedChunk;
 
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.locks.ReadWriteLock;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
 
@@ -29,9 +32,32 @@ import java.util.concurrent.locks.ReentrantReadWriteLock;
 @RequiredArgsConstructor
 public class SpringAiVectorIndexAdapter implements VectorIndexPort {
 
+    /**
+     * 候选放大倍数/下限/上限。
+     *
+     * <p>SimpleVectorStore 不支持按元数据做服务端过滤，只能"多取候选 → 应用侧按 userId 过滤"。
+     * 取少了会出现"前 N 条恰好全是别人的文档"，被误判成"无命中"→ 错误降级到关键词检索（漏召）。
+     * 放大本身很廉价：SimpleVectorStore 本来就要和全量文档算相似度，topK 只影响返回与排序。
+     */
+    private static final int CANDIDATE_MULTIPLIER = 20;
+    private static final int MIN_CANDIDATES = 100;
+    private static final int MAX_CANDIDATES = 500;
+
+    /** 单文档分块数上限：防御异常的 chunkCount 造成超大循环 */
+    private static final int MAX_CHUNKS_PER_DOC = 10_000;
+
     private final EmbeddingModel embeddingModel;
 
     private volatile VectorStore store;
+
+    /**
+     * 已索引分块 id 登记表（docId → chunkId 集合）。
+     *
+     * <p>只用"按 chunkCount 枚举 docId#0..n-1"删除是不够的：上一次索引中途失败时
+     * chunkCount 没被更新，那些已写入的块就成了永远删不掉的脏向量，还会被检索命中。
+     * 登记表是本进程的权威视图（进程重启后向量库本就为空，由启动重建流程重新登记）。
+     */
+    private final Map<Long, Set<String>> chunkIdsByDoc = new ConcurrentHashMap<>();
 
     /**
      * 向量库读写锁：SimpleVectorStore 内部是普通 Map，读（检索）与写（索引/删除）并发会读到不一致状态。
@@ -58,8 +84,15 @@ public class SpringAiVectorIndexAdapter implements VectorIndexPort {
                              int deleteExistingCount, Long userId) {
         deleteDocument(docId, deleteExistingCount); // 覆盖式重建
         List<String> chunks = TextChunker.split(fullText, chunkSize, chunkOverlap);
+        if (chunks.isEmpty()) {
+            chunkIdsByDoc.remove(docId);
+            return 0;
+        }
         List<Document> docs = new ArrayList<>(chunks.size());
+        Set<String> ids = new HashSet<>();
         for (int i = 0; i < chunks.size(); i++) {
+            String id = docId + "#" + i;
+            ids.add(id);
             Map<String, Object> meta = new HashMap<>();
             meta.put("docId", docId);
             meta.put("docName", docName);
@@ -67,15 +100,14 @@ public class SpringAiVectorIndexAdapter implements VectorIndexPort {
             if (userId != null) {
                 meta.put("userId", userId);
             }
-            docs.add(new Document(docId + "#" + i, chunks.get(i), meta));
+            docs.add(new Document(id, chunks.get(i), meta));
         }
-        if (!docs.isEmpty()) {
-            storeLock.writeLock().lock();
-            try {
-                store().add(docs);
-            } finally {
-                storeLock.writeLock().unlock();
-            }
+        storeLock.writeLock().lock();
+        try {
+            store().add(docs);
+            chunkIdsByDoc.put(docId, ids);
+        } finally {
+            storeLock.writeLock().unlock();
         }
         log.info("已索引文档 docId={} userId={} chunks={}", docId, userId, docs.size());
         return docs.size();
@@ -83,18 +115,24 @@ public class SpringAiVectorIndexAdapter implements VectorIndexPort {
 
     @Override
     public void deleteDocument(Long docId, int chunkCount) {
-        List<String> ids = new ArrayList<>();
-        int n = Math.min(Math.max(chunkCount, 0), 10_000);
+        Set<String> ids = new HashSet<>();
+        Set<String> tracked = chunkIdsByDoc.remove(docId);
+        if (tracked != null) {
+            ids.addAll(tracked);
+        }
+        // 登记表缺失时（例如本进程刚重启、还没重建索引）退化为按 chunkCount 枚举
+        int n = Math.min(Math.max(chunkCount, 0), MAX_CHUNKS_PER_DOC);
         for (int i = 0; i < n; i++) {
             ids.add(docId + "#" + i);
         }
-        if (ids.isEmpty()) {
+        if (ids.isEmpty() || this.store == null) {
+            // 本进程还没有向量库：没有东西可删，也不必为了删除去初始化一个空库
             return;
         }
         try {
             storeLock.writeLock().lock();
             try {
-                store().delete(ids);
+                store().delete(new ArrayList<>(ids));
             } finally {
                 storeLock.writeLock().unlock();
             }
@@ -105,9 +143,12 @@ public class SpringAiVectorIndexAdapter implements VectorIndexPort {
 
     @Override
     public List<RetrievedChunk> search(String query, int topK, double minScore, Long userId) {
+        if (this.store == null) {
+            // 还没有任何已索引内容：直接返回空，省掉一次无意义的 embedding 调用
+            return List.of();
+        }
         int k = Math.max(topK, 1);
-        // 多取一些候选，再按用户过滤，避免过滤后命中不足
-        int fetch = Math.max(k * 3, 10);
+        int fetch = Math.min(Math.max(k * CANDIDATE_MULTIPLIER, MIN_CANDIDATES), MAX_CANDIDATES);
         SearchRequest request = SearchRequest.builder()
                 .query(query)
                 .topK(fetch)
