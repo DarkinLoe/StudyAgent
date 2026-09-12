@@ -5,7 +5,6 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
 import studio.lingrui.studyagent.application.agent.AIPrompts;
 import studio.lingrui.studyagent.application.port.AiChatPort;
 import studio.lingrui.studyagent.domain.qa.Question;
@@ -35,7 +34,18 @@ public class DocumentQuestionService {
     private final ObjectMapper objectMapper;
     private final QuestionService questionService;
 
-    @Transactional
+    /**
+     * 基于已索引文档由 LLM 生成题目并写入题库。
+     *
+     * <p>刻意不加 {@code @Transactional}：
+     * <ol>
+     *   <li>中间有大模型调用（慢），套事务会长时间占用数据库连接；</li>
+     *   <li>单条题目解析失败会被跳过并继续，若共用一个大事务，
+     *       内层 {@code questionService.create}（自带事务）抛出的异常会把外层标记为
+     *       rollback-only，最终在提交时整体失败——"跳过坏题目、保留好题目"的容错就失效了。</li>
+     * </ol>
+     * 现在每条题目各自成事务：部分成功也是可接受的语义。
+     */
     public List<Question> generate(Long userId, Long docId) {
         KnowledgeDocument doc = documents.findByIdAndUserId(docId, userId)
                 .orElseThrow(() -> new BizException(ErrorCode.DOC_NOT_FOUND, "文档不存在"));

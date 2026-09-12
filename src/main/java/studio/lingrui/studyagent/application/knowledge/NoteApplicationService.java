@@ -4,7 +4,8 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
-import org.springframework.stereotype.Service;import org.springframework.transaction.annotation.Transactional;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 import studio.lingrui.studyagent.application.agent.AIPrompts;
 import studio.lingrui.studyagent.application.port.AiChatPort;
 import studio.lingrui.studyagent.domain.chat.ChatMessage;
@@ -74,8 +75,10 @@ public class NoteApplicationService {
 
     /**
      * 把一次问答会话自动整理成笔记。
+     *
+     * <p>刻意不加 {@code @Transactional}：中间要调一次大模型（秒级到分钟级）。
+     * 事务套住慢调用会长时间独占数据库连接；这里读数据与写笔记各自是独立短事务。
      */
-    @Transactional
     public StudyNote autoFromSession(Long userId, Long sessionId, String titleOverride) {
         ChatSession session = sessions.findByIdAndUserId(sessionId, userId)
                 .orElseThrow(() -> new BizException(ErrorCode.SESSION_NOT_FOUND, "会话不存在"));
@@ -106,8 +109,9 @@ public class NoteApplicationService {
 
     /**
      * 把知识库文档自动整理成笔记（需要文档已索引）。
+     *
+     * <p>同上：LLM 调用不在事务内。
      */
-    @Transactional
     public StudyNote autoFromDocument(Long userId, Long docId, String titleOverride) {
         KnowledgeDocument doc = documents.findByIdAndUserId(docId, userId)
                 .orElseThrow(() -> new BizException(ErrorCode.DOC_NOT_FOUND, "文档不存在"));
