@@ -1,0 +1,24 @@
+# 容器外部化配置（挂载到 /app/config/application.yml）
+#
+# 为什么需要它：
+#   application.yml 被打包进 jar，改了必须重新构建镜像；而 Docker BuildKit 在此机器上
+#   构建时可能 OOM。Spring Boot 默认会加载 ./config/ 目录下的配置，且**优先级高于 jar 内配置**，
+#   因此把易变的 AI 配置放在这里，改模型/密钥只要重建容器，无需重新构建镜像。
+#
+# 覆盖策略：扁平属性 chat.model 与嵌套 chat.options.model 同时给出，兼容 Spring AI 1.x/2.x。
+
+spring:
+  ai:
+    openai:
+      base-url: ${AI_BASE_URL:https://api.deepseek.com}
+      api-key: ${AI_API_KEY:sk-not-configured}
+      # 兜底：部分版本会从全局 model 解析默认模型
+      model: ${AI_CHAT_MODEL:deepseek-chat}
+      chat:
+        model: ${AI_CHAT_MODEL:deepseek-chat}
+        options:
+          model: ${AI_CHAT_MODEL:deepseek-chat}
+      embedding:
+        model: ${AI_EMBEDDING_MODEL:text-embedding-3-small}
+        options:
+          model: ${AI_EMBEDDING_MODEL:text-embedding-3-small}

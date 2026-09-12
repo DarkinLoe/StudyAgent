@@ -88,11 +88,22 @@ services:
       AI_API_KEY: ${AI_API_KEY:-sk-not-configured}
       AI_CHAT_MODEL: ${AI_CHAT_MODEL:-deepseek-chat}
       AI_EMBEDDING_MODEL: ${AI_EMBEDDING_MODEL:-}
+      # 直接用 Spring Boot 环境变量覆盖 Spring AI 配置（relaxed binding）：
+      # 好处是改模型/密钥不必重新构建镜像（application.yml 是打包进 jar 的）。
+      # 同时覆盖扁平属性 chat.model 与嵌套写法 chat.options.model，避免版本差异导致静默失效。
+      SPRING_AI_OPENAI_BASE_URL: ${AI_BASE_URL:-https://api.deepseek.com}
+      SPRING_AI_OPENAI_API_KEY: ${AI_API_KEY:-sk-not-configured}
+      SPRING_AI_OPENAI_CHAT_MODEL: ${AI_CHAT_MODEL:-deepseek-chat}
+      SPRING_AI_OPENAI_CHAT_OPTIONS_MODEL: ${AI_CHAT_MODEL:-deepseek-chat}
+      SPRING_AI_OPENAI_EMBEDDING_MODEL: ${AI_EMBEDDING_MODEL:-text-embedding-3-small}
+      SPRING_AI_OPENAI_EMBEDDING_OPTIONS_MODEL: ${AI_EMBEDDING_MODEL:-text-embedding-3-small}
       UPLOAD_DIR: /app/data/uploads
     ports:
       - "${SERVER_PORT:-8080}:8080"
     volumes:
       - app-data:/app/data
+      # 外部化配置：优先级高于 jar 内 application.yml，改模型/密钥无需重新构建镜像
+      - ./docker/app-config/application.yml:/app/config/application.yml:ro
 
   # ---------------- 前端（Vue3 + Vite 构建，Nginx 托管并反代后端） ----------------
   # 用法：docker compose --profile app up -d --build
