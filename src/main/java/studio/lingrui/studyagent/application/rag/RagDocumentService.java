@@ -40,8 +40,17 @@ public class RagDocumentService {
 
     /**
      * 上传并启动摄入。
+     *
+     * <p><b>刻意不加 @Transactional</b>：摄入（Tika 解析 + 向量化）是秒级到分钟级的重活，
+     * 且 MQ 启用时要把消息发到队列。如果包在事务里会有两个问题：
+     * <ol>
+     *   <li>消息在事务提交前就发出去了，消费者可能还读不到这条文档（publish-in-transaction 竞态）；</li>
+     *   <li>{@link RagIngestService#ingest} 在失败时会写 FAILED 状态再抛异常，
+     *       外层事务回滚会把这条 FAILED 记录一起抹掉——磁盘上留下孤儿文件，
+     *       前端却看不到任何失败痕迹（"失败可见"的设计被事务吃掉）。</li>
+     * </ol>
+     * 这里只做一次单行插入（Repository 自带事务），随后在事务外派发。
      */
-    @Transactional
     public KnowledgeDocument upload(Long userId, MultipartFile file,
                                     DocumentSourceType sourceType, String tagsJson) {
         if (file == null || file.isEmpty()) {
@@ -72,21 +81,29 @@ public class RagDocumentService {
                 .orElseThrow(() -> new BizException(ErrorCode.DOC_NOT_FOUND, "文档不存在"));
     }
 
-    @Transactional
+    /**
+     * 删除文档。
+     *
+     * <p>顺序刻意是「先删元数据行 → 再尽力清文件与向量」：如果先删文件而事务回滚，
+     * 就会留下指向不存在文件的脏记录（重新索引必失败）。反过来只可能残留一点磁盘/内存垃圾，
+     * 属于可接受的泄漏，不会破坏一致性。
+     */
     public void delete(Long userId, Long docId) {
         KnowledgeDocument doc = documents.findByIdAndUserId(docId, userId)
                 .orElseThrow(() -> new BizException(ErrorCode.DOC_NOT_FOUND, "文档不存在"));
+        documents.delete(doc);
         if (doc.getStoredPath() != null) {
             fileStore.delete(doc.getStoredPath());
         }
         vectorIndex.deleteDocument(docId, doc.getChunkCount() == null ? 0 : doc.getChunkCount());
-        documents.delete(doc);
     }
 
     /**
      * 重新摄入（对 FAILED/PENDING/INDEXED 均可）。
+     *
+     * <p>同样不加 @Transactional：摄入失败时要让 FAILED 状态与错误信息真正落库，
+     * 否则前端只会看到"失败"却查不到原因。
      */
-    @Transactional
     public KnowledgeDocument reindex(Long userId, Long docId) {
         documents.findByIdAndUserId(docId, userId)
                 .orElseThrow(() -> new BizException(ErrorCode.DOC_NOT_FOUND, "文档不存在"));
@@ -115,6 +132,12 @@ public class RagDocumentService {
         return keywordSearch.search(userId, query, k);
     }
 
+    /**
+     * 派发摄入任务：MQ 启用时入队异步处理，否则当前线程同步执行。
+     *
+     * <p>注意调用点必须在任何数据库写事务<b>之外</b>（见 {@link #upload}）：
+     * 消息一旦先于事务提交发出，消费者就可能查不到这条文档。
+     */
     private void dispatch(Long docId) {
         MqGateway mq = mqGatewayProvider.getIfAvailable();
         if (props.getMq().isEnabled() && mq != null) {

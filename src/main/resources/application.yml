@@ -71,10 +71,21 @@ spring:
     port: ${RABBITMQ_PORT:5672}
     username: ${RABBITMQ_USERNAME:guest}
     password: ${RABBITMQ_PASSWORD:guest}
+    # 发布确认/无法路由回调：消息没被 Broker 确认或找不到队列时能立刻在日志里看到
+    publisher-confirm-type: correlated
+    publisher-returns: true
     listener:
       simple:
         # 默认不自动启动消费者：未启用 MQ 时应用可无 RabbitMQ 独立运行
         auto-startup: ${STUDY_AGENT_MQ_ENABLED:false}
+        # 重试耗尽后拒绝消息（转死信），而不是无限 requeue 把消费者打死
+        default-requeue-rejected: false
+        retry:
+          enabled: true
+          max-attempts: 3
+          initial-interval: 2s
+          multiplier: 2
+          max-interval: 20s
 
   # ---------------- Spring AI：OpenAI 兼容端点 ----------------
   ai:
