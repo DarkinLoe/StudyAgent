@@ -15,6 +15,7 @@ import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.chat.prompt.Prompt;
 import org.springframework.ai.openai.OpenAiChatOptions;
 import org.springframework.ai.tool.ToolCallback;
+import org.springframework.core.env.Environment;
 import org.springframework.stereotype.Service;
 import studio.lingrui.studyagent.application.agent.skill.AgentSkill;
 import studio.lingrui.studyagent.application.port.AiChatPort;
@@ -50,6 +51,7 @@ public class OpenAiChatAdapter implements AiChatPort {
 
     private final ChatModel chatModel;
     private final ObjectMapper objectMapper;
+    private final Environment environment;
 
     @Override
     public AiChatResult chat(List<ChatTurn> turns) {
@@ -145,12 +147,43 @@ public class OpenAiChatAdapter implements AiChatPort {
                 new ChatTurn(TurnRole.USER, userContent)), List.of()).text();
     }
 
+    /**
+     * 调用模型。
+     *
+     * <p>关键：这里**显式**把配置的模型名写进请求选项，不再依赖框架的默认模型。
+     * 背景：Spring AI 2.0 中 {@code spring.ai.openai.chat.options.model} 的绑定行为不稳定，
+     * 缺失时会回落到库内置默认模型（表现为 404: The model `gpt-5-mini` does not exist），
+     * 显式指定可彻底避免该问题；模型名按 chat.model → chat.options.model → openai.model 依次解析。
+     */
     private ChatResponse callModel(List<Message> messages, List<ToolCallback> callbacks) {
-        if (callbacks == null || callbacks.isEmpty()) {
-            return chatModel.call(new Prompt(messages));
+        OpenAiChatOptions.Builder builder = OpenAiChatOptions.builder();
+        String model = resolveChatModel();
+        if (model != null) {
+            builder.model(model);
         }
-        return chatModel.call(new Prompt(messages,
-                OpenAiChatOptions.builder().toolCallbacks(callbacks).build()));
+        if (callbacks != null && !callbacks.isEmpty()) {
+            builder.toolCallbacks(callbacks);
+        }
+        log.debug("AI 请求参数 model={} tools={}", model,
+                callbacks == null ? 0 : callbacks.size());
+        return chatModel.call(new Prompt(messages, builder.build()));
+    }
+
+    /** 依次从三个候选配置项解析聊天模型名，取到第一个非空值 */
+    private String resolveChatModel() {
+        String[] keys = {
+                "spring.ai.openai.chat.model",
+                "spring.ai.openai.chat.options.model",
+                "spring.ai.openai.model",
+                "AI_CHAT_MODEL"
+        };
+        for (String key : keys) {
+            String value = environment.getProperty(key);
+            if (value != null && !value.isBlank()) {
+                return value.trim();
+            }
+        }
+        return null;
     }
 
     /** 技能执行兜底：任何异常都转成可读文本，绝不让异常打断工具循环 */
